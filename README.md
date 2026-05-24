@@ -37,7 +37,8 @@ deploy-vps
 **Bước 3**: Trả lời các câu hỏi cực kỳ dễ hiểu.
 - *Nếu thư mục chưa nối với Github*, công cụ sẽ hỏi bạn link Repository.
 - **Tài khoản VPS**: Nhập IP, Username, Mật khẩu (Mật khẩu KHÔNG lưu ở đâu cả, chỉ dùng để SSH vào cài đặt 1 lần).
-- **Tên miền**: Nhập tên miền (Ví dụ: phuquoc.test9.io.vn). Nginx và Let's Encrypt sẽ dựa vào đây để hoạt động.
+- **Tên miền**: Nhập tên miền chính xác (Ví dụ: `phuquoc.test9.io.vn`). Nginx và Let's Encrypt sẽ dựa vào đây để hoạt động.
+  *⚠️ LƯU Ý: Tuyệt đối không nhập `http://`, `https://` hay dấu `/` ở cuối tên miền, nếu không công cụ cấp chứng chỉ SSL Certbot sẽ báo lỗi.*
 - **Loại dự án**: Chọn 1 trong 5 loại dự án kể trên (Bằng cách gõ số 1, 2, 3, 4, 5 rồi Enter).
 - **Vai trò & Thư mục**: Hỗ trợ tốt nhất cho Monorepo (chọn `./frontend` hoặc `./backend`). Nếu là dự án gộp thì cứ để mặc định `./`.
 
@@ -81,3 +82,10 @@ Khi bạn push code lên Github, Github Actions sẽ kích hoạt cả 2 file ym
 - Public Key được gửi vào VPS.
 - Private Key được nhét vào tính năng lưu trữ khoá bí mật siêu cấp an toàn của Github (Repository Secrets).
 - Cuối cùng quá trình kết nối giữa Github và VPS chỉ sử dụng chiếc "chìa khóa vô hình" này, không bao giờ cần mật khẩu nữa!
+
+## Các Lỗi Thường Gặp (FAQ)
+
+**1. Báo lỗi "Requested name... appears to be a URL" ở Bước 1**
+- **Dấu hiệu:** Công cụ báo lỗi khi đang xin cấp chứng chỉ SSL (Let's Encrypt).
+- **Nguyên nhân:** Khi công cụ hỏi "Nhập Tên Miền (Domain)", bạn đã nhập là `http://domain.com/`. Chứng chỉ SSL Certbot chỉ chấp nhận **tên miền trần** (FQDN - Fully Qualified Domain Name) như `domain.com`. Nó không chấp nhận giao thức `http://` hay dấu `/` ở cuối.
+- **Cách khắc phục:** Chạy lại công cụ và chỉ gõ đúng chữ `domain.com` là xong.
