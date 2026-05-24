@@ -1,0 +1,23 @@
+{
+  "name": "deploy-vps",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "bin": {
+    "deploy-vps": "bin/index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "execa": "^9.6.1",
+    "inquirer": "^13.4.3",
+    "node-ssh": "^13.2.1",
+    "ssh2": "^1.17.0"
+  }
+}
