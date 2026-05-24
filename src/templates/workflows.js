@@ -178,9 +178,9 @@ export function generateWorkflowFile(projectType, domain, role, workingDir, useP
     }
 
     // Đặt tên file dựa trên role
-    const fileName = role === 'Fullstack (Gốc)' ? 'deploy.yml' : \`deploy-\${role.toLowerCase()}.yml\`;
+    const fileName = role === 'Fullstack (Gốc)' ? 'deploy.yml' : `deploy-${role.toLowerCase()}.yml`;
     const workflowPath = path.join(workflowsDir, fileName);
     
     fs.writeFileSync(workflowPath, workflowContent);
-    console.log(\`Đã tạo file workflow tại: \${workflowPath}\`);
+    console.log(`Đã tạo file workflow tại: ${workflowPath}`);
 }
