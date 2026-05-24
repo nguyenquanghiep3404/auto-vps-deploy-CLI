@@ -1,7 +1,27 @@
 import fs from 'fs';
 import path from 'path';
 
-function getNodeWorkflow() {
+function getWorkingDirConfig(workingDir) {
+    if (workingDir && workingDir !== './') {
+        return `
+    defaults:
+      run:
+        working-directory: ${workingDir}`;
+    }
+    return '';
+}
+
+function getNodeWorkflow(domain, workingDir, usePrisma) {
+    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
+    const pm2RestartCmd = `pm2 restart app || pm2 start npm --name "app" -- run start`;
+    
+    let dbCmds = '';
+    if (usePrisma) {
+        dbCmds = `
+            npx prisma generate
+            npx prisma db push --accept-data-loss`;
+    }
+
     return `name: Deploy Node.js App
 
 on:
@@ -12,7 +32,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -38,22 +58,23 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude 'node_modules' ./ $USER@$HOST:/var/www/my-app
+          rsync -avz --delete --exclude '.git' --exclude 'node_modules' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 
-      - name: Restart PM2
+      - name: Restart PM2 & Update DB
         uses: appleboy/ssh-action@master
         with:
           host: \${{ secrets.VPS_HOST }}
           username: \${{ secrets.VPS_USERNAME }}
           key: \${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /var/www/my-app
-            npm ci --production
-            pm2 restart app || pm2 start npm --name "app" -- run start
+            cd /var/www/${domain}
+            npm ci --production${dbCmds}
+            ${pm2RestartCmd}
 `;
 }
 
-function getLaravelWorkflow(domain) {
+function getLaravelWorkflow(domain, workingDir) {
+    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
     return `name: Deploy Laravel App
 
 on:
@@ -64,7 +85,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -88,7 +109,7 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude 'storage/logs' ./ $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' --exclude 'storage/logs' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 
       - name: Run Migrations & Cache
         uses: appleboy/ssh-action@master
@@ -106,7 +127,8 @@ jobs:
 `;
 }
 
-function getStaticWorkflow(domain) {
+function getStaticWorkflow(domain, workingDir) {
+    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
     return `name: Deploy Static Website
 
 on:
@@ -117,7 +139,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -132,33 +154,33 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' ./ $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 `;
 }
 
 /**
  * Sinh file .github/workflows/deploy.yml
  */
-export function generateWorkflowFile(projectType, domain) {
+export function generateWorkflowFile(projectType, domain, role, workingDir, usePrisma) {
     const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
     
-    // Tạo thư mục nếu chưa có
     if (!fs.existsSync(workflowsDir)) {
         fs.mkdirSync(workflowsDir, { recursive: true });
     }
 
     let workflowContent = '';
     if (projectType === 'Node.js (PM2)') {
-        workflowContent = getNodeWorkflow();
-        // Cập nhật lại đường dẫn cho Node.js app
-        workflowContent = workflowContent.replace(/my-app/g, domain);
+        workflowContent = getNodeWorkflow(domain, workingDir, usePrisma);
     } else if (projectType === 'PHP (Laravel)') {
-        workflowContent = getLaravelWorkflow(domain);
+        workflowContent = getLaravelWorkflow(domain, workingDir);
     } else {
-        workflowContent = getStaticWorkflow(domain);
+        workflowContent = getStaticWorkflow(domain, workingDir);
     }
 
-    const workflowPath = path.join(workflowsDir, 'deploy.yml');
+    // Đặt tên file dựa trên role
+    const fileName = role === 'Fullstack (Gốc)' ? 'deploy.yml' : \`deploy-\${role.toLowerCase()}.yml\`;
+    const workflowPath = path.join(workflowsDir, fileName);
+    
     fs.writeFileSync(workflowPath, workflowContent);
-    console.log(`Đã tạo file workflow tại: ${workflowPath}`);
+    console.log(\`Đã tạo file workflow tại: \${workflowPath}\`);
 }

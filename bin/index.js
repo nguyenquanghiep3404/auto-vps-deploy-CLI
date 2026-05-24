@@ -3,7 +3,7 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { generateSSHKeys, installPublicKeyToVPS } from '../src/utils/ssh.js';
-import { checkGithubAuth, loginGithub, setGithubSecret } from '../src/github/secrets.js';
+import { checkGithubAuth, loginGithub, setGithubSecret, installGithubCli } from '../src/github/secrets.js';
 import { setupWebserverOnVPS } from '../src/vps/setup.js';
 import { generateWorkflowFile } from '../src/templates/workflows.js';
 
@@ -12,7 +12,39 @@ async function main() {
     console.log(chalk.gray('Công cụ này sẽ tự động hóa việc cấu hình VPS, thiết lập SSL, và tạo Github Actions Workflow cho bạn.\n'));
 
     // 1. Kiểm tra Github CLI
-    const isGhLoggedIn = await checkGithubAuth();
+    let isGhLoggedIn = false;
+    try {
+        isGhLoggedIn = await checkGithubAuth();
+    } catch (error) {
+        if (error.message === 'NOT_INSTALLED') {
+            console.log(chalk.red('\n❌ Lỗi: Máy tính của bạn chưa cài đặt Github CLI (gh).'));
+            
+            const { autoInstall } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'autoInstall',
+                message: 'Bạn có muốn công cụ tự động cài đặt Github CLI bằng winget ngay bây giờ không?',
+                default: true
+            }]);
+            
+            if (autoInstall) {
+                const success = await installGithubCli();
+                if (success) {
+                    console.log(chalk.green('\n✅ Cài đặt thành công!'));
+                    console.log(chalk.yellow('⚠️  Tuy nhiên, để máy tính nhận diện được lệnh "gh", bạn BẮT BUỘC phải khởi động lại Terminal.'));
+                    console.log(chalk.cyan('Vui lòng tắt cửa sổ PowerShell này đi, mở lại và chạy lại lệnh deploy-vps.'));
+                    process.exit(0);
+                } else {
+                    console.log(chalk.red('\n❌ Cài đặt tự động thất bại.'));
+                    console.log(chalk.yellow('Vui lòng cài đặt thủ công tại: https://cli.github.com/ hoặc chạy lệnh: winget install --id GitHub.cli'));
+                    process.exit(1);
+                }
+            } else {
+                console.log(chalk.yellow('\nVui lòng cài đặt thủ công tại: https://cli.github.com/ hoặc chạy lệnh: winget install --id GitHub.cli'));
+                process.exit(1);
+            }
+        }
+    }
+
     if (!isGhLoggedIn) {
         console.log(chalk.yellow('⚠️  Bạn chưa đăng nhập Github CLI.'));
         const { proceed } = await inquirer.prompt([{
@@ -69,10 +101,29 @@ async function main() {
             message: 'Dự án Node.js đang chạy ở cổng nào (Port)?',
             default: '3000',
             when: (answers) => answers.projectType === 'Node.js (PM2)'
+        },
+        {
+            type: 'list',
+            name: 'role',
+            message: 'Vai trò của phần dự án này là gì? (Dùng để đặt tên file workflow)',
+            choices: ['Frontend', 'Backend', 'Fullstack (Gốc)']
+        },
+        {
+            type: 'input',
+            name: 'workingDir',
+            message: 'Thư mục chứa mã nguồn nằm ở đâu trong Repository? (Ví dụ: ./frontend)',
+            default: './'
+        },
+        {
+            type: 'confirm',
+            name: 'usePrisma',
+            message: 'Bạn có sử dụng Prisma ORM để quản lý Database không?',
+            default: false,
+            when: (answers) => answers.projectType === 'Node.js (PM2)'
         }
     ]);
 
-    const { vpsHost, vpsUser, vpsPassword, domain, projectType, port } = answers;
+    const { vpsHost, vpsUser, vpsPassword, domain, projectType, port, role, workingDir, usePrisma } = answers;
 
     try {
         console.log(chalk.cyan('\n⚙️  Bắt đầu quá trình tự động hóa...'));
@@ -97,7 +148,7 @@ async function main() {
 
         // 6. Tạo Workflow file
         console.log(chalk.blue('\n▶️  Bước 4: Tạo Github Actions Workflow...'));
-        generateWorkflowFile(projectType, domain);
+        generateWorkflowFile(projectType, domain, role, workingDir, usePrisma);
         console.log(chalk.green('✅ Xong Bước 4.'));
 
         console.log(chalk.green.bold('\n🎉 HOÀN TẤT! 🎉'));

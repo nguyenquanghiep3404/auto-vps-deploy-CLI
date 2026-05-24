@@ -78,16 +78,14 @@ export async function setupWebserverOnVPS(host, username, password, domain, proj
         // Enable site
         await ssh.execCommand(`sudo ln -sfn ${configPath} /etc/nginx/sites-enabled/`);
         
-        // Tạo thư mục web root nếu cần
-        if (projectType === 'Static' || projectType === 'PHP (Laravel)') {
-            const rootPath = projectType === 'PHP (Laravel)' ? `/var/www/${domain}/public` : `/var/www/${domain}`;
-            await ssh.execCommand(`sudo mkdir -p ${rootPath} && sudo chown -R $USER:$USER /var/www/${domain}`);
-        }
+        // Tạo thư mục web root cho mọi dự án để rsync không bị lỗi quyền
+        const rootPath = projectType === 'PHP (Laravel)' ? `/var/www/${domain}/public` : `/var/www/${domain}`;
+        await ssh.execCommand(`sudo mkdir -p ${rootPath} && sudo chown -R $USER:$USER /var/www/${domain}`);
 
         console.log('Khởi động lại Nginx...');
         await ssh.execCommand('sudo systemctl restart nginx');
 
-        console.log('Đang xin cấp chứng chỉ SSL (Let\\'s Encrypt)...');
+        console.log("Đang xin cấp chứng chỉ SSL (Let's Encrypt)...");
         // Xin chứng chỉ SSL (non-interactive)
         const certbotCmd = `sudo certbot --nginx -d ${domain} --non-interactive --agree-tos -m admin@${domain} --redirect`;
         const sslResult = await ssh.execCommand(certbotCmd);
