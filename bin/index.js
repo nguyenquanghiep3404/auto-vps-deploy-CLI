@@ -90,7 +90,7 @@ async function main() {
             validate: input => input ? true : 'Không được để trống'
         },
         {
-            type: 'list',
+            type: 'rawlist',
             name: 'projectType',
             message: 'Chọn loại dự án của bạn:',
             choices: ['Node.js (PM2)', 'PHP (Laravel)', 'Static']
@@ -103,7 +103,7 @@ async function main() {
             when: (answers) => answers.projectType === 'Node.js (PM2)'
         },
         {
-            type: 'list',
+            type: 'rawlist',
             name: 'role',
             message: 'Vai trò của phần dự án này là gì? (Dùng để đặt tên file workflow)',
             choices: ['Frontend', 'Backend', 'Fullstack (Gốc)']
