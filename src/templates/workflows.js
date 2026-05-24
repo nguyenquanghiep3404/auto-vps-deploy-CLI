@@ -127,6 +127,81 @@ jobs:
 `;
 }
 
+function getPurePhpWorkflow(domain, workingDir) {
+    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
+    return `name: Deploy PHP App
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Copy files to VPS via rsync
+        env:
+          SSH_KEY: \${{ secrets.VPS_SSH_KEY }}
+          HOST: \${{ secrets.VPS_HOST }}
+          USER: \${{ secrets.VPS_USERNAME }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
+          rsync -avz --delete --exclude '.git' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+`;
+}
+
+function getSpaWorkflow(domain, workingDir, buildDir) {
+    let rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
+    rsyncSrc = path.posix.join(rsyncSrc, buildDir, '/'); // e.g., ./dist/ or ./frontend/dist/
+
+    return `name: Deploy SPA (React/Vite/Vue)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Project
+        run: npm run build
+
+      - name: Copy files to VPS via rsync
+        env:
+          SSH_KEY: \${{ secrets.VPS_SSH_KEY }}
+          HOST: \${{ secrets.VPS_HOST }}
+          USER: \${{ secrets.VPS_USERNAME }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
+          rsync -avz --delete --exclude '.git' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+`;
+}
+
 function getStaticWorkflow(domain, workingDir) {
     const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
     return `name: Deploy Static Website
@@ -161,7 +236,7 @@ jobs:
 /**
  * Sinh file .github/workflows/deploy.yml
  */
-export function generateWorkflowFile(projectType, domain, role, workingDir, usePrisma) {
+export function generateWorkflowFile(projectType, domain, role, workingDir, buildDir, usePrisma) {
     const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
     
     if (!fs.existsSync(workflowsDir)) {
@@ -169,18 +244,22 @@ export function generateWorkflowFile(projectType, domain, role, workingDir, useP
     }
 
     let workflowContent = '';
-    if (projectType === 'Node.js (PM2)') {
+    if (projectType.includes('Node.js')) {
         workflowContent = getNodeWorkflow(domain, workingDir, usePrisma);
     } else if (projectType === 'PHP (Laravel)') {
         workflowContent = getLaravelWorkflow(domain, workingDir);
+    } else if (projectType === 'PHP (Thuần)') {
+        workflowContent = getPurePhpWorkflow(domain, workingDir);
+    } else if (projectType === 'React/Vite/Vue (SPA)') {
+        workflowContent = getSpaWorkflow(domain, workingDir, buildDir);
     } else {
         workflowContent = getStaticWorkflow(domain, workingDir);
     }
 
     // Đặt tên file dựa trên role
-    const fileName = role === 'Fullstack (Gốc)' ? 'deploy.yml' : `deploy-${role.toLowerCase()}.yml`;
+    const fileName = role === 'Fullstack (Gốc)' ? 'deploy.yml' : \`deploy-\${role.toLowerCase()}.yml\`;
     const workflowPath = path.join(workflowsDir, fileName);
     
     fs.writeFileSync(workflowPath, workflowContent);
-    console.log(`Đã tạo file workflow tại: ${workflowPath}`);
+    console.log(\`Đã tạo file workflow tại: \${workflowPath}\`);
 }

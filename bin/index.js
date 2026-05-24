@@ -93,14 +93,20 @@ async function main() {
             type: 'rawlist',
             name: 'projectType',
             message: 'Chọn loại dự án của bạn:',
-            choices: ['Node.js (PM2)', 'PHP (Laravel)', 'Static']
+            choices: [
+                'Node.js (PM2 - Next.js, Express, NestJS...)', 
+                'PHP (Laravel)', 
+                'PHP (Thuần)', 
+                'React/Vite/Vue (SPA)', 
+                'Static (HTML thuần)'
+            ]
         },
         {
             type: 'input',
             name: 'port',
             message: 'Dự án Node.js đang chạy ở cổng nào (Port)?',
             default: '3000',
-            when: (answers) => answers.projectType === 'Node.js (PM2)'
+            when: (answers) => answers.projectType.includes('Node.js')
         },
         {
             type: 'rawlist',
@@ -115,15 +121,22 @@ async function main() {
             default: './'
         },
         {
+            type: 'input',
+            name: 'buildDir',
+            message: 'Thư mục output sau khi build của dự án tên là gì? (Ví dụ: dist, build)',
+            default: 'dist',
+            when: (answers) => answers.projectType === 'React/Vite/Vue (SPA)'
+        },
+        {
             type: 'confirm',
             name: 'usePrisma',
             message: 'Bạn có sử dụng Prisma ORM để quản lý Database không?',
             default: false,
-            when: (answers) => answers.projectType === 'Node.js (PM2)'
+            when: (answers) => answers.projectType.includes('Node.js')
         }
     ]);
 
-    const { vpsHost, vpsUser, vpsPassword, domain, projectType, port, role, workingDir, usePrisma } = answers;
+    const { vpsHost, vpsUser, vpsPassword, domain, projectType, port, role, workingDir, buildDir, usePrisma } = answers;
 
     try {
         console.log(chalk.cyan('\n⚙️  Bắt đầu quá trình tự động hóa...'));
@@ -148,7 +161,7 @@ async function main() {
 
         // 6. Tạo Workflow file
         console.log(chalk.blue('\n▶️  Bước 4: Tạo Github Actions Workflow...'));
-        generateWorkflowFile(projectType, domain, role, workingDir, usePrisma);
+        generateWorkflowFile(projectType, domain, role, workingDir, buildDir, usePrisma);
         console.log(chalk.green('✅ Xong Bước 4.'));
 
         console.log(chalk.green.bold('\n🎉 HOÀN TẤT! 🎉'));

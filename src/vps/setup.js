@@ -4,7 +4,7 @@ import { NodeSSH } from 'node-ssh';
  * Tạo cấu hình Nginx dựa trên loại dự án
  */
 function generateNginxConfig(domain, projectType, port) {
-    if (projectType === 'Node.js (PM2)') {
+    if (projectType.includes('Node.js')) {
         return `
 server {
     server_name ${domain};
@@ -18,11 +18,12 @@ server {
     }
 }
 `;
-    } else if (projectType === 'PHP (Laravel)') {
+    } else if (projectType.includes('PHP')) {
+        const rootDir = projectType === 'PHP (Laravel)' ? `/var/www/${domain}/public` : `/var/www/${domain}`;
         return `
 server {
     server_name ${domain};
-    root /var/www/${domain}/public;
+    root ${rootDir};
     index index.php index.html index.htm;
 
     location / {
@@ -34,6 +35,18 @@ server {
         fastcgi_pass unix:/var/run/php/php8.1-fpm.sock; # Có thể cần điều chỉnh phiên bản PHP
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
+    }
+}
+`;
+    } else if (projectType === 'React/Vite/Vue (SPA)') {
+        return `
+server {
+    server_name ${domain};
+    root /var/www/${domain};
+    index index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ /index.html;
     }
 }
 `;
