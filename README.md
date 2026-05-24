@@ -52,6 +52,29 @@ Bạn chỉ việc mở tab Actions trên Github.com lên và nhìn mã nguồn 
 3. Tool sẽ hỏi tên thư mục xuất code. Đa số với Vite là `dist`, với Create React App là `build`. Cứ điền cho chính xác.
 4. Tool sẽ lo mọi thứ: Từ chạy `npm run build` trên máy chủ Github cho đến rsync sang VPS, đặc biệt file config trên VPS được tool cài đặt sẵn rule để xử lý lỗi F5 Client-side Routing. Quá tuyệt vời!
 
+## Hướng Dẫn Setup Monorepo (Ví dụ: Next.js + Express.js)
+Với cấu trúc Monorepo, bạn cần phân tách 2 port và 2 sub-domain để chúng không bị xung đột trên VPS. Ví dụ Backend chạy ở `api.domain.com` (Port 4000) và Frontend chạy ở `domain.com` (Port 3000). 
+
+**Lần 1: Cấu hình cho Backend**
+1. Chạy `deploy-vps`.
+2. Tên miền: Nhập `api.domain.com`.
+3. Loại dự án: Chọn `Node.js (PM2...)`.
+4. Cổng: Nhập `4000`.
+5. Vai trò: Chọn `Backend`.
+6. Thư mục: Nhập `./backend`.
+👉 Hệ thống sinh ra file `.github/workflows/deploy-backend.yml`.
+
+**Lần 2: Cấu hình cho Frontend**
+1. Chạy lại `deploy-vps`.
+2. Tên miền: Nhập `domain.com`.
+3. Loại dự án: Chọn `Node.js (PM2...)`.
+4. Cổng: Nhập `3000`.
+5. Vai trò: Chọn `Frontend`.
+6. Thư mục: Nhập `./frontend`.
+👉 Hệ thống sinh ra file `.github/workflows/deploy-frontend.yml`.
+
+Khi bạn push code lên Github, Github Actions sẽ kích hoạt cả 2 file yml này độc lập. Mã nguồn ở thư mục nào sẽ được build và cập nhật cho thư mục đó, hoàn toàn không bị ảnh hưởng lẫn nhau!
+
 ## Vấn Đề Bảo Mật (Zero-Trust)
 - **Mật khẩu VPS của bạn an toàn tuyệt đối**. Công cụ không lưu mật khẩu ra file hay gửi lên bất kỳ máy chủ nào.
 - Ngay khi công cụ có được quyền truy cập bằng mật khẩu, nó lập tức đẻ ra một cặp khóa bảo mật **RSA (SSH Keys)**.
