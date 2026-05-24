@@ -7,17 +7,29 @@ import path from 'path';
  * Tạo cặp khóa SSH RSA
  */
 export function generateSSHKeys() {
-    const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+    const { publicKey: pubObj, privateKey } = generateKeyPairSync('rsa', {
         modulusLength: 4096,
-        publicKeyEncoding: {
-            type: 'spki',
-            format: 'openssh'
-        },
         privateKeyEncoding: {
             type: 'pkcs8',
             format: 'pem'
         }
     });
+
+    // Chuyển đổi sang JWK để lấy Modulus (n) và Exponent (e)
+    const jwk = pubObj.export({ format: 'jwk' });
+    const b64url2b64 = str => Buffer.from(str, 'base64url');
+    const e = b64url2b64(jwk.e);
+    const n = b64url2b64(jwk.n);
+
+    // Xây dựng chuỗi Byte ssh-rsa chuẩn
+    const len = buf => { 
+        const b = Buffer.alloc(4); 
+        b.writeUInt32BE(buf.length); 
+        return b; 
+    };
+    const type = Buffer.from('ssh-rsa');
+    const parts = [len(type), type, len(e), e, len(n), n];
+    const publicKey = 'ssh-rsa ' + Buffer.concat(parts).toString('base64') + ' deploy-vps-key';
 
     return { publicKey, privateKey };
 }
