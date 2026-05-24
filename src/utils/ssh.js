@@ -21,17 +21,25 @@ export function generateSSHKeys() {
     const e = b64url2b64(jwk.e);
     const n = b64url2b64(jwk.n);
 
-    // Xây dựng chuỗi Byte ssh-rsa chuẩn
-    const len = buf => { 
-        const b = Buffer.alloc(4); 
-        b.writeUInt32BE(buf.length); 
-        return b; 
+    // Hàm mã hóa số nguyên lớn theo chuẩn MPINT của SSH (RFC 4251)
+    const mpint = (buf) => {
+        if (buf[0] & 0x80) {
+            const b = Buffer.alloc(buf.length + 1);
+            b[0] = 0x00;
+            buf.copy(b, 1);
+            buf = b;
+        }
+        const len = Buffer.alloc(4);
+        len.writeUInt32BE(buf.length);
+        return Buffer.concat([len, buf]);
     };
-    const type = Buffer.from('ssh-rsa');
-    const parts = [len(type), type, len(e), e, len(n), n];
-    const publicKey = 'ssh-rsa ' + Buffer.concat(parts).toString('base64') + ' deploy-vps-key';
 
-    return { publicKey, privateKey };
+    const type = Buffer.from('ssh-rsa');
+    const typeLen = Buffer.alloc(4);
+    typeLen.writeUInt32BE(type.length);
+    const pubKey = 'ssh-rsa ' + Buffer.concat([typeLen, type, mpint(e), mpint(n)]).toString('base64') + ' deploy-vps-key';
+
+    return { publicKey: pubKey, privateKey };
 }
 
 /**
