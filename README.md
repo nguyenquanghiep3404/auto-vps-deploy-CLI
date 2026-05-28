@@ -122,7 +122,7 @@ Khi bạn push code lên Github, Github Actions sẽ kích hoạt cả 2 file ym
 - **Nguyên nhân:** SSH Key trên VPS không khớp với SSH Key trên Github Secrets. Thường xảy ra khi bạn đã chạy tool nhiều lần hoặc thay đổi VPS.
 - **Cách khắc phục:** Chạy lại `deploy-vps` để tool tự động tạo cặp SSH Key mới và đồng bộ lại cả VPS lẫn Github Secrets.
 
-**4. Báo lỗi "Vite requires Node.js version 20+" trên Github Actions**
-- **Dấu hiệu:** Bước `npm run build` trên Github Actions bị lỗi với thông báo yêu cầu Node.js 20+.
-- **Nguyên nhân:** File workflow `.yml` đang dùng phiên bản Node.js cũ (18).
-- **Cách khắc phục:** Mở file `.github/workflows/deploy.yml`, tìm dòng `node-version: '18'` và đổi thành `node-version: '20'`. Sau đó commit và push lại.
+**4. Báo lỗi yêu cầu phiên bản Node.js cao hơn trên Github Actions**
+- **Dấu hiệu:** Bước `npm run build` trên Github Actions bị lỗi với thông báo yêu cầu Node.js phiên bản cao hơn.
+- **Nguyên nhân:** File workflow `.yml` đang dùng phiên bản Node.js cũ.
+- **Cách khắc phục:** Mở file `.github/workflows/deploy.yml`, tìm dòng `node-version` và đổi thành `node-version: '26'`. Sau đó commit và push lại.
