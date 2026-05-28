@@ -1,6 +1,6 @@
 # Auto VPS Deploy CLI 🚀
 
-Công cụ tự động hóa toàn diện quá trình cấu hình VPS, thiết lập SSL, và tạo Github Actions Workflow. Châm ngôn của công cụ này là **"Gõ lệnh một lần, Deploy mãi mãi"**. Đặc biệt hỗ trợ tối đa cho các cấu trúc dự án phức tạp như **Monorepo**, **Database Migration** tự động, các web SPA (React, Vite, Vue) và tự động hóa cả Git!
+Công cụ tự động hóa toàn diện quá trình cấu hình VPS, thiết lập SSL, và tạo Github Actions Workflow. Đặc biệt hỗ trợ tối đa cho các cấu trúc dự án phức tạp như **Monorepo**, **Database Migration** tự động, các web SPA (React, Vite, Vue) và tự động hóa cả Git!
 
 ## Các Tính Năng Đỉnh Cao (Version 5.1)
 - **Tự động gán Port thông minh**: Tool SSH vào VPS, quét toàn bộ cổng đang bị chiếm trong dãy 3000-3999, rồi tự gán cổng trống tiếp theo cho dự án. Người dùng không cần biết "Port là gì" cũng triển khai được!
