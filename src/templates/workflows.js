@@ -11,9 +11,9 @@ function getWorkingDirConfig(workingDir) {
     return '';
 }
 
-function getNodeWorkflow(domain, workingDir, usePrisma) {
+function getNodeWorkflow(domain, workingDir, usePrisma, port) {
     const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
-    const pm2RestartCmd = `pm2 restart app || pm2 start npm --name "app" -- run start`;
+    const pm2RestartCmd = `PORT=${port} pm2 restart app-${domain} || PORT=${port} pm2 start npm --name "app-${domain}" -- run start`;
     
     let dbCmds = '';
     if (usePrisma) {
@@ -236,7 +236,7 @@ jobs:
 /**
  * Sinh file .github/workflows/deploy.yml
  */
-export function generateWorkflowFile(projectType, domain, role, workingDir, buildDir, usePrisma) {
+export function generateWorkflowFile(projectType, domain, role, workingDir, buildDir, usePrisma, port) {
     const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
     
     if (!fs.existsSync(workflowsDir)) {
@@ -245,7 +245,7 @@ export function generateWorkflowFile(projectType, domain, role, workingDir, buil
 
     let workflowContent = '';
     if (projectType.includes('Node.js')) {
-        workflowContent = getNodeWorkflow(domain, workingDir, usePrisma);
+        workflowContent = getNodeWorkflow(domain, workingDir, usePrisma, port);
     } else if (projectType === 'PHP (Laravel)') {
         workflowContent = getLaravelWorkflow(domain, workingDir);
     } else if (projectType === 'PHP (Thuần)') {

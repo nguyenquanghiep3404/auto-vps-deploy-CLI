@@ -71,3 +71,50 @@ export async function installPublicKeyToVPS(host, username, password, publicKey)
         ssh.dispose();
     }
 }
+
+/**
+ * Quét các port đang được sử dụng trên VPS trong dãy 3000-3999
+ * Trả về mảng các số port đã bị chiếm
+ */
+export async function scanUsedPorts(host, username, password) {
+    const ssh = new NodeSSH();
+    try {
+        await ssh.connect({
+            host: host,
+            username: username,
+            password: password,
+        });
+
+        // Chạy lệnh ss để liệt kê các port đang LISTEN
+        const result = await ssh.execCommand("ss -tlnp | awk '{print $4}' | grep -oP '\\d+$' | sort -n | uniq");
+        
+        if (result.stdout) {
+            const ports = result.stdout
+                .split('\n')
+                .map(p => parseInt(p.trim()))
+                .filter(p => !isNaN(p) && p >= 3000 && p <= 3999);
+            return ports;
+        }
+        return [];
+    } catch (error) {
+        // Nếu không thể quét, trả về mảng rỗng (sẽ bắt đầu từ 3000)
+        return [];
+    } finally {
+        ssh.dispose();
+    }
+}
+
+/**
+ * Tìm port trống tiếp theo trong dãy 3000-3999
+ * usedPorts: mảng các port đã bị chiếm
+ * count: số lượng port trống cần tìm
+ */
+export function findAvailablePorts(usedPorts, count = 1) {
+    const available = [];
+    for (let port = 3000; port <= 3999 && available.length < count; port++) {
+        if (!usedPorts.includes(port)) {
+            available.push(port);
+        }
+    }
+    return available;
+}

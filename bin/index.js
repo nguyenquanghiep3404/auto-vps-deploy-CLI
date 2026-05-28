@@ -2,7 +2,7 @@
 
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import { generateSSHKeys, installPublicKeyToVPS } from '../src/utils/ssh.js';
+import { generateSSHKeys, installPublicKeyToVPS, scanUsedPorts, findAvailablePorts } from '../src/utils/ssh.js';
 import { checkGithubAuth, loginGithub, setGithubSecret, installGithubCli } from '../src/github/secrets.js';
 import { setupWebserverOnVPS } from '../src/vps/setup.js';
 import { generateWorkflowFile } from '../src/templates/workflows.js';
@@ -136,6 +136,19 @@ async function main() {
     const isMonorepo = projectStructure.includes('Monorepo');
 
     // ========================================
+    // 3.5 Quét port đang dùng trên VPS (cho dự án Node.js)
+    // ========================================
+    console.log(chalk.gray('🔍 Đang quét các cổng (port) đã sử dụng trên VPS...'));
+    const usedPortsOnVPS = await scanUsedPorts(vpsHost, vpsUser, vpsPassword);
+    // Mảng theo dõi tất cả port đã gán trong phiên này
+    const allUsedPorts = [...usedPortsOnVPS];
+    if (usedPortsOnVPS.length > 0) {
+        console.log(chalk.gray(`   Các cổng đã bị chiếm trên VPS: ${usedPortsOnVPS.join(', ')}`));
+    } else {
+        console.log(chalk.gray('   Không có cổng nào trong dãy 3000-3999 đang bị chiếm.'));
+    }
+
+    // ========================================
     // 4. Thu thập cấu hình cho từng phần
     // ========================================
     const parts = []; // Mảng chứa cấu hình của từng phần
@@ -163,13 +176,6 @@ async function main() {
             },
             {
                 type: 'input',
-                name: 'port',
-                message: 'Dự án Node.js đang chạy ở cổng nào (Port)?',
-                default: '3000',
-                when: (a) => a.projectType.includes('Node.js')
-            },
-            {
-                type: 'input',
                 name: 'buildDir',
                 message: 'Thư mục output sau khi build của dự án tên là gì? (Ví dụ: dist, build)',
                 default: 'dist',
@@ -184,11 +190,20 @@ async function main() {
             }
         ]);
 
+        // Tự động gán port cho dự án Node.js
+        let autoPort = undefined;
+        if (singleAnswers.projectType.includes('Node.js')) {
+            const [port] = findAvailablePorts(allUsedPorts, 1);
+            autoPort = port;
+            allUsedPorts.push(port);
+            console.log(chalk.green(`✅ Đã tự động gán cổng: ${port}`));
+        }
+
         parts.push({
             name: 'Fullstack (Gốc)',
             domain: singleAnswers.domain,
             projectType: singleAnswers.projectType,
-            port: singleAnswers.port,
+            port: autoPort,
             workingDir: './',
             buildDir: singleAnswers.buildDir,
             usePrisma: singleAnswers.usePrisma
@@ -241,13 +256,6 @@ async function main() {
                 },
                 {
                     type: 'input',
-                    name: 'port',
-                    message: `Phần này chạy ở cổng nào (Port)?`,
-                    default: i === 1 ? '3000' : `${3000 + i - 1}`,
-                    when: (a) => a.projectType.includes('Node.js')
-                },
-                {
-                    type: 'input',
                     name: 'buildDir',
                     message: 'Thư mục output sau khi build tên là gì? (Ví dụ: dist, build)',
                     default: 'dist',
@@ -269,11 +277,20 @@ async function main() {
                 }
             ]);
 
+            // Tự động gán port cho dự án Node.js
+            let autoPort = undefined;
+            if (partAnswers.projectType.includes('Node.js')) {
+                const [port] = findAvailablePorts(allUsedPorts, 1);
+                autoPort = port;
+                allUsedPorts.push(port);
+                console.log(chalk.green(`   ✅ Đã tự động gán cổng cho ${partAnswers.partName}: ${port}`));
+            }
+
             parts.push({
                 name: partAnswers.partName,
                 domain: partAnswers.domain,
                 projectType: partAnswers.projectType,
-                port: partAnswers.port,
+                port: autoPort,
                 workingDir: partAnswers.workingDir,
                 buildDir: partAnswers.buildDir,
                 usePrisma: partAnswers.usePrisma
@@ -284,7 +301,8 @@ async function main() {
         console.log(chalk.cyan.bold('\n📋 Tóm tắt cấu hình Monorepo:'));
         console.log(chalk.gray('─'.repeat(60)));
         parts.forEach((p, idx) => {
-            console.log(chalk.white(`  ${idx + 1}. ${chalk.bold(p.name)}: ${p.domain} | ${p.projectType} | Thư mục: ${p.workingDir}`));
+            const portInfo = p.port ? ` | Cổng: ${p.port}` : '';
+            console.log(chalk.white(`  ${idx + 1}. ${chalk.bold(p.name)}: ${p.domain} | ${p.projectType}${portInfo} | Thư mục: ${p.workingDir}`));
         });
         console.log(chalk.gray('─'.repeat(60)));
     }
@@ -320,7 +338,7 @@ async function main() {
         console.log(chalk.blue('\n▶️  Bước 4: Tạo Github Actions Workflow...'));
         for (const part of parts) {
             const role = isMonorepo ? part.name : part.name; // Single: 'Fullstack (Gốc)', Monorepo: tên phần
-            generateWorkflowFile(part.projectType, part.domain, role, part.workingDir, part.buildDir, part.usePrisma);
+            generateWorkflowFile(part.projectType, part.domain, role, part.workingDir, part.buildDir, part.usePrisma, part.port);
         }
         console.log(chalk.green('✅ Xong Bước 4.'));
 
