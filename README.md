@@ -23,7 +23,7 @@ Công cụ tự động hóa toàn diện quá trình cấu hình VPS, thiết l
 ## Cài Đặt (Global)
 Tại bất kỳ máy tính nào, bạn chỉ cần mở Terminal (Command Prompt / PowerShell) lên và gõ:
 ```bash
-npm install -g git+https://github.com/nguyenquanghiep3404/Deploy-vps-automation.git
+npm install -g git+https://github.com/nguyenquanghiep3404/Automated-VPS-Deployment.git
 ```
 Chỉ sau khoảng 30 giây, máy tính của bạn sẽ sở hữu một "chuyên gia DevOps" mang tên `deploy-vps`.
 
