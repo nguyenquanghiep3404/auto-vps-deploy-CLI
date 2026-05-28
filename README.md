@@ -2,11 +2,12 @@
 
 Công cụ tự động hóa toàn diện quá trình cấu hình VPS, thiết lập SSL, và tạo Github Actions Workflow. Châm ngôn của công cụ này là **"Gõ lệnh một lần, Deploy mãi mãi"**. Đặc biệt hỗ trợ tối đa cho các cấu trúc dự án phức tạp như **Monorepo**, **Database Migration** tự động, các web SPA (React, Vite, Vue) và tự động hóa cả Git!
 
-## Các Tính Năng Đỉnh Cao (Version 5)
-- **Hỗ trợ Monorepo trong 1 lần chạy duy nhất**: Không cần chạy tool 2 lần nữa! Chỉ cần chọn `Monorepo`, nhập số phần (VD: 2 cho frontend + backend), tool sẽ tự hỏi cấu hình riêng cho từng phần và sinh ra các file workflow độc lập.
+## Các Tính Năng Đỉnh Cao (Version 5.1)
+- **Tự động gán Port thông minh**: Tool SSH vào VPS, quét toàn bộ cổng đang bị chiếm trong dãy 3000-3999, rồi tự gán cổng trống tiếp theo cho dự án. Người dùng không cần biết "Port là gì" cũng triển khai được!
+- **Hỗ trợ Monorepo trong 1 lần chạy duy nhất**: Chỉ cần chọn `Monorepo`, nhập số phần (VD: 2 cho frontend + backend), tool sẽ tự hỏi cấu hình riêng cho từng phần và sinh ra các file workflow độc lập.
 - **Tự động nhận diện Git Repository**: Khởi động tool ở thư mục mới toanh? Tool sẽ tự hỏi link Github của bạn rồi gõ `git init`, `git remote add origin` thay bạn!
-- **Tự động Push Code 100%**: Khi cài đặt xong, công cụ tự động gõ `git add`, `commit` và `push` toàn bộ code lên nhánh `main` luôn, không cần bạn phải động tay gõ lệnh Push nữa.
-- **Tự động cấu hình Web Server & SSL**: Tự động kết nối SSH, cài đặt Nginx, tạo thư mục dự án chuẩn quyền truy cập, thiết lập cấu hình proxy/root, cấp chứng chỉ HTTPS (Certbot) hoàn toàn miễn phí.
+- **Tự động Push Code 100%**: Khi cài đặt xong, công cụ tự động gõ `git add`, `commit` và `push` toàn bộ code lên nhánh `main` luôn.
+- **Tự động cấu hình Web Server & SSL**: Tự động kết nối SSH, cài đặt Nginx, thiết lập cấu hình proxy/root, cấp chứng chỉ HTTPS (Let's Encrypt/Certbot) hoàn toàn miễn phí.
 - **Hỗ trợ 5 hệ sinh thái dự án khác nhau**:
   1. `Node.js (PM2)`: Dành cho Next.js, Express, NestJS...
   2. `React/Vite/Vue (SPA)`: Tự động chạy NPM Build ra thư mục tĩnh, xử lý triệt để lỗi 404 khi load lại (F5) trang nhờ config `try_files` chuyên biệt.
@@ -41,6 +42,7 @@ deploy-vps
 - **Tên miền**: Nhập tên miền chính xác (Ví dụ: `phuquoc.test9.io.vn`).
   *⚠️ LƯU Ý: Tuyệt đối không nhập `http://`, `https://` hay dấu `/` ở cuối tên miền, nếu không công cụ cấp chứng chỉ SSL Certbot sẽ báo lỗi.*
 - **Loại dự án**: Chọn 1 trong 5 loại dự án kể trên (Bằng cách gõ số 1, 2, 3, 4, 5 rồi Enter).
+- **Cổng (Port)**: Bạn **không cần nhập gì cả**! Tool tự động SSH vào VPS quét cổng nào đã bị chiếm và gán cổng trống tiếp theo cho dự án của bạn.
 
 **Bước 4**: Thưởng thức thành quả!
 Sau khi nhập xong, bạn cứ đi pha một ly cà phê. Tool sẽ tự động kết nối vào VPS cài Nginx, tự nối SSH Keys cho Github Actions, tự tạo file `.github/workflows/deploy.yml`, sau đó... nó **tự động Commit và Push toàn bộ code lên Github** luôn cho bạn! 
@@ -51,11 +53,10 @@ Bạn chỉ việc mở tab Actions trên Github.com lên và nhìn mã nguồn 
 Nếu dự án của bạn chỉ có một loại duy nhất (VD: chỉ có Frontend hoặc chỉ có Backend), hãy chọn `Single` ở bước chọn cấu trúc. Tool sẽ hỏi bạn:
 - Tên miền
 - Loại dự án (Node.js / PHP / SPA / Static)
-- Port (nếu Node.js)
 - Thư mục output (nếu SPA)
 - Prisma ORM (nếu Node.js)
 
-Sau đó tool tự động sinh ra file `deploy.yml` duy nhất.
+Cổng (Port) được tool tự động gán, bạn không cần lo. Sau đó tool tự động sinh ra file `deploy.yml` duy nhất.
 
 ## Cách Triển Khai Dự Án SPA (React / Vite)
 1. Chạy lệnh `deploy-vps`.
@@ -67,32 +68,60 @@ Sau đó tool tự động sinh ra file `deploy.yml` duy nhất.
 ## Hướng Dẫn Setup Monorepo (Ví dụ: Next.js + Express.js)
 Từ Version 5, bạn chỉ cần **chạy tool 1 lần duy nhất** cho toàn bộ dự án Monorepo!
 
-Với cấu trúc Monorepo, bạn cần chuẩn bị 2 tên miền khác nhau và 2 port khác nhau để các phần không xung đột. Ví dụ: Frontend chạy ở `domain.com` (Port 3000) và Backend chạy ở `api.domain.com` (Port 4000).
+Với cấu trúc Monorepo, bạn cần chuẩn bị 2 tên miền khác nhau để các phần không xung đột. Ví dụ: Frontend dùng `domain.com` và Backend dùng `api.domain.com`. Cổng (Port) được tool tự gán, bạn không cần lo!
 
 **Các bước thực hiện:**
 1. Chạy `deploy-vps`.
 2. Nhập thông tin VPS (IP, Username, Password) — **chỉ nhập 1 lần duy nhất**.
-3. Chọn cấu trúc: `Monorepo`.
-4. Nhập số phần: `2` (hoặc 3, 4... tùy dự án).
-5. **Cấu hình PHẦN 1/2 (Frontend):**
+3. Tool tự động quét cổng đang dùng trên VPS.
+4. Chọn cấu trúc: `Monorepo`.
+5. Nhập số phần: `2` (hoặc 3, 4... tùy dự án).
+6. **Cấu hình PHẦN 1/2 (Frontend):**
    - Tên phần: `frontend`
    - Tên miền: `domain.com`
    - Loại dự án: `Node.js (PM2...)`
-   - Cổng: `3000`
    - Thư mục: `./frontend`
-6. **Cấu hình PHẦN 2/2 (Backend):**
+   - ✅ Tool tự gán cổng: 3000
+7. **Cấu hình PHẦN 2/2 (Backend):**
    - Tên phần: `backend`
    - Tên miền: `api.domain.com`
    - Loại dự án: `Node.js (PM2...)`
-   - Cổng: `4000`
    - Thư mục: `./backend`
-7. Tool sẽ hiển thị bảng tóm tắt và bắt đầu tự động hóa toàn bộ:
+   - ✅ Tool tự gán cổng: 3001
+8. Tool hiển thị bảng tóm tắt và bắt đầu tự động hóa toàn bộ:
    - Cấu hình Nginx + SSL cho **tất cả** domain cùng lúc.
    - Tạo SSH Key **1 lần duy nhất**.
    - Sinh ra **2 file workflow riêng biệt**: `deploy-frontend.yml` và `deploy-backend.yml`.
    - Tự động Push code lên Github.
 
 Khi bạn push code lên Github, Github Actions sẽ kích hoạt cả 2 file yml này độc lập. Mã nguồn ở thư mục nào sẽ được build và cập nhật cho thư mục đó, hoàn toàn không bị ảnh hưởng lẫn nhau!
+
+## Cách Hệ Thống Port Tự Động Hoạt Động
+
+Nếu bạn đã triển khai nhiều dự án lên cùng 1 VPS, bạn không cần lo bị trùng cổng. Tool tự quản lý:
+
+| Lần deploy | Dự án | Tool tự gán |
+|---|---|---|
+| Lần 1 | Portfolio (Next.js) | Cổng 3000 |
+| Lần 2 | Blog (Express) | Cổng 3001 (vì 3000 đã chiếm) |
+| Lần 3 | API khách hàng | Cổng 3002 (vì 3000, 3001 đã chiếm) |
+
+Tool sẽ SSH vào VPS, chạy lệnh `ss -tlnp` để quét tất cả cổng đang hoạt động, sau đó tự tìm cổng trống tiếp theo trong dãy 3000-3999 để gán. PM2 sẽ khởi động ứng dụng với biến `PORT=XXXX` tương ứng, đảm bảo mọi thứ luôn khớp hoàn hảo.
+
+## Kiến Thức Cơ Bản: Port & SSL
+
+### Port (Cổng) là gì?
+Hãy tưởng tượng VPS là **một tòa chung cư** có 65.535 căn hộ. Mỗi ứng dụng web phải "thuê" 1 căn hộ (port) để hoạt động. 2 ứng dụng không thể ở chung 1 căn hộ.
+- **Port 80, 443**: Dành riêng cho Nginx (bảo vệ tòa nhà), tiếp nhận mọi khách truy cập từ Internet.
+- **Port 3000-3999**: Dành cho các dự án của bạn, chạy ngầm phía sau Nginx.
+
+Khi người dùng gõ `domain.com`, trình duyệt tự gõ cửa port 443 → Nginx mở cửa → kiểm tra tên miền → dẫn khách vào đúng căn hộ (VD: port 3000). Người dùng không bao giờ thấy số port.
+
+### SSL (HTTPS) là gì?
+- **Không có SSL** (`http://`): Dữ liệu bay trên Internet ở dạng trần trụi, ai cũng đọc được. Giống viết mật khẩu lên bưu thiếp.
+- **Có SSL** (`https://`): Dữ liệu được mã hóa thành ký tự vô nghĩa, chỉ VPS của bạn mới giải mã được. Giống bỏ thư vào két sắt có khóa.
+
+Tool sử dụng **Let's Encrypt (Certbot)** để cấp chứng chỉ SSL **miễn phí 100%**, đảm bảo website luôn hiển thị ổ khóa xanh 🔒.
 
 ## Vấn Đề Bảo Mật (Zero-Trust)
 - **Mật khẩu VPS của bạn an toàn tuyệt đối**. Công cụ không lưu mật khẩu ra file hay gửi lên bất kỳ máy chủ nào.
