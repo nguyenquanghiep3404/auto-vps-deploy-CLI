@@ -1,142 +1,144 @@
 # Auto VPS Deploy CLI 🚀
 
-Công cụ tự động hóa toàn diện quá trình cấu hình VPS, thiết lập SSL, và tạo Github Actions Workflow. Đặc biệt hỗ trợ tối đa cho các cấu trúc dự án phức tạp như **Monorepo**, **Database Migration** tự động, các web SPA (React, Vite, Vue) và tự động hóa cả Git!
+🌐 *Language: **English** | [Tiếng Việt](README.vi.md)*
 
-## Các Tính Năng Trong Version 5.1
-- **Tự động gán Port thông minh**: Tool SSH vào VPS, quét toàn bộ cổng đang bị chiếm trong dãy 3000-3999, rồi tự gán cổng trống tiếp theo cho dự án. Người dùng không cần biết "Port là gì" cũng triển khai được!
-- **Hỗ trợ Monorepo trong 1 lần chạy duy nhất**: Chỉ cần chọn `Monorepo`, nhập số phần (VD: 2 cho frontend + backend), tool sẽ tự hỏi cấu hình riêng cho từng phần và sinh ra các file workflow độc lập.
-- **Tự động nhận diện Git Repository**: Khởi động tool ở thư mục mới toanh? Tool sẽ tự hỏi link Github của bạn rồi gõ `git init`, `git remote add origin` thay bạn!
-- **Tự động Push Code 100%**: Khi cài đặt xong, công cụ tự động gõ `git add`, `commit` và `push` toàn bộ code lên nhánh `main` luôn.
-- **Tự động cấu hình Web Server & SSL**: Tự động kết nối SSH, cài đặt Nginx, thiết lập cấu hình proxy/root, cấp chứng chỉ HTTPS (Let's Encrypt/Certbot) hoàn toàn miễn phí.
-- **Hỗ trợ 5 hệ sinh thái dự án khác nhau**:
-  1. `Node.js (PM2)`: Dành cho Next.js, Express, NestJS...
-  2. `React/Vite/Vue (SPA)`: Tự động chạy NPM Build ra thư mục tĩnh, xử lý triệt để lỗi 404 khi load lại (F5) trang nhờ config `try_files` chuyên biệt.
-  3. `PHP (Laravel)`: Tự chạy Composer Install và Artisan migrate trên VPS.
-  4. `PHP (Thuần)`: Môi trường PHP cơ bản nhất mà không dư thừa cấu hình.
-  5. `Static`: HTML, CSS thuần túy.
-- **Prisma Database Migration**: Nếu chọn nền tảng Node.js, tool sẽ tự động chèn lệnh `npx prisma generate` và `npx prisma db push` vào kịch bản deploy.
+A comprehensive automation tool for VPS configuration, SSL setup, and Github Actions Workflow generation. With special support for complex project structures like **Monorepo**, automatic **Database Migration**, SPA web apps (React, Vite, Vue), and full Git automation!
 
-## Yêu Cầu Hệ Thống
-- **Node.js** (phiên bản 18 trở lên)
-- **Github CLI (`gh`)**: Công cụ sẽ tự động kiểm tra, nếu máy chưa cài nó sẽ hỏi và sử dụng trình cài đặt `winget` của Windows để cài đặt hộ bạn.
+## Features in Version 5.1
+- **Smart Auto Port Assignment**: The tool SSHs into your VPS, scans all occupied ports in the 3000-3999 range, and automatically assigns the next available port. You don't even need to know what a "port" is to deploy!
+- **Monorepo Support in a Single Run**: Just select `Monorepo`, enter the number of parts (e.g., 2 for frontend + backend), and the tool will ask for each part's configuration and generate independent workflow files.
+- **Auto Git Repository Detection**: Starting the tool in a brand new folder? It will ask for your Github link and run `git init`, `git remote add origin` for you!
+- **100% Auto Push Code**: After setup is complete, the tool automatically runs `git add`, `commit`, and `push` all code to the `main` branch.
+- **Auto Web Server & SSL Configuration**: Automatically connects via SSH, installs Nginx, sets up proxy/root configuration, and provisions free HTTPS certificates (Let's Encrypt/Certbot).
+- **Supports 5 Different Project Ecosystems**:
+  1. `Node.js (PM2)`: For Next.js, Express, NestJS...
+  2. `React/Vite/Vue (SPA)`: Automatically runs NPM Build to a static directory, fully handles 404 errors on page reload (F5) with specialized `try_files` config.
+  3. `PHP (Laravel)`: Auto-runs Composer Install and Artisan migrate on VPS.
+  4. `PHP (Vanilla)`: The most basic PHP environment without extra configuration.
+  5. `Static`: Pure HTML, CSS.
+- **Prisma Database Migration**: If you choose the Node.js platform, the tool automatically injects `npx prisma generate` and `npx prisma db push` commands into the deploy script.
 
-## Cài Đặt (Global)
-Tại bất kỳ máy tính nào, bạn chỉ cần mở Terminal (Command Prompt / PowerShell) lên và gõ:
+## System Requirements
+- **Node.js** (version 18 or higher)
+- **Github CLI (`gh`)**: The tool will automatically check for it. If not installed, it will prompt and use Windows' `winget` installer to install it for you.
+
+## Installation (Global)
+On any computer, just open Terminal (Command Prompt / PowerShell) and run:
 ```bash
 npm install -g git+https://github.com/nguyenquanghiep3404/Automated-VPS-Deployment.git
 ```
-Chỉ sau khoảng 30 giây, máy tính của bạn sẽ sở hữu một "chuyên gia DevOps" mang tên `deploy-vps`.
+In just about 30 seconds, your computer will have a "DevOps expert" named `deploy-vps`.
 
-## Hướng Dẫn Sử Dụng
-**Bước 1**: Di chuyển vào thư mục code của bạn (có thể đã là git repo hoặc chưa, không quan trọng).
+## Usage Guide
+**Step 1**: Navigate to your code directory (it can already be a git repo or not — doesn't matter).
 
-**Bước 2**: Chạy công cụ:
+**Step 2**: Run the tool:
 ```bash
 deploy-vps
 ```
 
-**Bước 3**: Trả lời các câu hỏi.
-- *Nếu thư mục chưa nối với Github*, công cụ sẽ hỏi bạn link Repository.
-- **Tài khoản VPS**: Nhập IP, Username, Mật khẩu (Mật khẩu KHÔNG lưu ở đâu cả, chỉ dùng để SSH vào cài đặt 1 lần).
-- **Cấu trúc dự án**: Chọn `Single` nếu là dự án đơn, hoặc `Monorepo` nếu dự án có nhiều phần (frontend + backend + admin...).
-- **Tên miền**: Nhập tên miền chính xác (Ví dụ: `phuquoc.test9.io.vn`).
-  *⚠️ LƯU Ý: Tuyệt đối không nhập `http://`, `https://` hay dấu `/` ở cuối tên miền, nếu không công cụ cấp chứng chỉ SSL Certbot sẽ báo lỗi.*
-- **Loại dự án**: Chọn 1 trong 5 loại dự án kể trên (Bằng cách gõ số 1, 2, 3, 4, 5 rồi Enter).
-- **Cổng (Port)**: Bạn **không cần nhập gì cả**! Tool tự động SSH vào VPS quét cổng nào đã bị chiếm và gán cổng trống tiếp theo cho dự án của bạn.
+**Step 3**: Answer the prompts.
+- *If the folder is not linked to Github*, the tool will ask for your Repository URL.
+- **VPS Credentials**: Enter IP, Username, Password (Password is NOT stored anywhere — it's only used once for the initial SSH setup).
+- **Project Structure**: Choose `Single` for a single project, or `Monorepo` for multi-part projects (frontend + backend + admin...).
+- **Domain**: Enter the exact domain name (e.g., `myapp.example.com`).
+  *⚠️ NOTE: Never enter `http://`, `https://`, or a trailing `/` in the domain name, otherwise the SSL Certbot certificate process will fail.*
+- **Project Type**: Choose 1 of the 5 project types listed above (by typing 1, 2, 3, 4, or 5 and pressing Enter).
+- **Port**: You **don't need to enter anything**! The tool automatically SSHs into the VPS, scans for occupied ports, and assigns the next available one.
 
-**Bước 4**: Thưởng thức thành quả!
-Sau khi nhập xong, bạn cứ đi pha một ly cà phê. Tool sẽ tự động kết nối vào VPS cài Nginx, tự nối SSH Keys cho Github Actions, tự tạo file `.github/workflows/deploy.yml`, sau đó... nó **tự động Commit và Push toàn bộ code lên Github** luôn cho bạn! 
+**Step 4**: Enjoy the results!
+After answering the prompts, go grab a cup of coffee. The tool will automatically connect to the VPS, install Nginx, set up SSH Keys for Github Actions, create the `.github/workflows/deploy.yml` file, and then... it **automatically Commits and Pushes all code to Github** for you!
 
-Bạn chỉ việc mở tab Actions trên Github.com lên và nhìn mã nguồn tự động bay sang VPS một cách mượt mà!
+Just open the Actions tab on Github.com and watch your code smoothly fly to the VPS!
 
-## Dự Án Single (Dự Án Đơn)
-Nếu dự án của bạn chỉ có một loại duy nhất (VD: chỉ có Frontend hoặc chỉ có Backend), hãy chọn `Single` ở bước chọn cấu trúc. Tool sẽ hỏi bạn:
-- Tên miền
-- Loại dự án (Node.js / PHP / SPA / Static)
-- Thư mục output (nếu SPA)
-- Prisma ORM (nếu Node.js)
+## Single Project
+If your project has only one type (e.g., only Frontend or only Backend), choose `Single` at the structure selection step. The tool will ask you for:
+- Domain name
+- Project type (Node.js / PHP / SPA / Static)
+- Output directory (if SPA)
+- Prisma ORM (if Node.js)
 
-Cổng (Port) được tool tự động gán, bạn không cần lo. Sau đó tool tự động sinh ra file `deploy.yml` duy nhất.
+The port is automatically assigned by the tool — no worries. Then the tool generates a single `deploy.yml` file.
 
-## Cách Triển Khai Dự Án SPA (React / Vite)
-1. Chạy lệnh `deploy-vps`.
-2. Chọn cấu trúc `Single`.
-3. Chọn loại dự án `React/Vite/Vue (SPA)`.
-4. Tool sẽ hỏi tên thư mục xuất code. Đa số với Vite là `dist`, với Create React App là `build`. Cứ điền cho chính xác.
-5. Tool sẽ lo mọi thứ: Từ chạy `npm run build` trên máy chủ Github cho đến rsync sang VPS, đặc biệt file config trên VPS được tool cài đặt sẵn rule để xử lý lỗi F5 Client-side Routing. Quá tuyệt vời!
+## How to Deploy an SPA Project (React / Vite)
+1. Run the `deploy-vps` command.
+2. Choose the `Single` structure.
+3. Choose the `React/Vite/Vue (SPA)` project type.
+4. The tool will ask for the output directory name. For most Vite projects it's `dist`, for Create React App it's `build`. Just enter the correct one.
+5. The tool handles everything: from running `npm run build` on the Github server to rsyncing to the VPS. The VPS config file is pre-configured with rules to handle F5 Client-side Routing errors. Amazing!
 
-## Hướng Dẫn Setup Monorepo (Ví dụ: Next.js + Express.js)
-Từ Version 5, bạn chỉ cần **chạy tool 1 lần duy nhất** cho toàn bộ dự án Monorepo!
+## Monorepo Setup Guide (Example: Next.js + Express.js)
+Since Version 5, you only need to **run the tool once** for the entire Monorepo project!
 
-Với cấu trúc Monorepo, bạn cần chuẩn bị 2 tên miền khác nhau để các phần không xung đột. Ví dụ: Frontend dùng `domain.com` và Backend dùng `api.domain.com`. Cổng (Port) được tool tự gán, bạn không cần lo!
+For a Monorepo structure, you need to prepare 2 different domains so the parts don't conflict. For example: Frontend uses `domain.com` and Backend uses `api.domain.com`. Ports are auto-assigned by the tool — no worries!
 
-**Các bước thực hiện:**
-1. Chạy `deploy-vps`.
-2. Nhập thông tin VPS (IP, Username, Password) — **chỉ nhập 1 lần duy nhất**.
-3. Tool tự động quét cổng đang dùng trên VPS.
-4. Chọn cấu trúc: `Monorepo`.
-5. Nhập số phần: `2` (hoặc 3, 4... tùy dự án).
-6. **Cấu hình PHẦN 1/2 (Frontend):**
-   - Tên phần: `frontend`
-   - Tên miền: `domain.com`
-   - Loại dự án: `Node.js (PM2...)`
-   - Thư mục: `./frontend`
-   - ✅ Tool tự gán cổng: 3000
-7. **Cấu hình PHẦN 2/2 (Backend):**
-   - Tên phần: `backend`
-   - Tên miền: `api.domain.com`
-   - Loại dự án: `Node.js (PM2...)`
-   - Thư mục: `./backend`
-   - ✅ Tool tự gán cổng: 3001
-8. Tool hiển thị bảng tóm tắt và bắt đầu tự động hóa toàn bộ:
-   - Cấu hình Nginx + SSL cho **tất cả** domain cùng lúc.
-   - Tạo SSH Key **1 lần duy nhất**.
-   - Sinh ra **2 file workflow riêng biệt**: `deploy-frontend.yml` và `deploy-backend.yml`.
-   - Tự động Push code lên Github.
+**Steps:**
+1. Run `deploy-vps`.
+2. Enter VPS credentials (IP, Username, Password) — **enter only once**.
+3. The tool automatically scans ports in use on the VPS.
+4. Choose structure: `Monorepo`.
+5. Enter number of parts: `2` (or 3, 4... depending on your project).
+6. **Configure PART 1/2 (Frontend):**
+   - Part name: `frontend`
+   - Domain: `domain.com`
+   - Project type: `Node.js (PM2...)`
+   - Directory: `./frontend`
+   - ✅ Tool auto-assigns port: 3000
+7. **Configure PART 2/2 (Backend):**
+   - Part name: `backend`
+   - Domain: `api.domain.com`
+   - Project type: `Node.js (PM2...)`
+   - Directory: `./backend`
+   - ✅ Tool auto-assigns port: 3001
+8. The tool displays a summary table and begins full automation:
+   - Configures Nginx + SSL for **all** domains at once.
+   - Creates SSH Key **only once**.
+   - Generates **2 separate workflow files**: `deploy-frontend.yml` and `deploy-backend.yml`.
+   - Auto-pushes code to Github.
 
-Khi bạn push code lên Github, Github Actions sẽ kích hoạt cả 2 file yml này độc lập. Mã nguồn ở thư mục nào sẽ được build và cập nhật cho thư mục đó, hoàn toàn không bị ảnh hưởng lẫn nhau!
+When you push code to Github, Github Actions will trigger both yml files independently. Code in each directory will be built and deployed to its respective folder, with absolutely no interference between parts!
 
-## Cách Hệ Thống Port Tự Động Hoạt Động
+## How the Auto Port System Works
 
-Nếu bạn đã triển khai nhiều dự án lên cùng 1 VPS, bạn không cần lo bị trùng cổng. Tool tự quản lý:
+If you've deployed multiple projects to the same VPS, you don't need to worry about port conflicts. The tool manages it all:
 
-| Lần deploy | Dự án | Tool tự gán |
+| Deploy # | Project | Auto-assigned |
 |---|---|---|
-| Lần 1 | Portfolio (Next.js) | Cổng 3000 |
-| Lần 2 | Blog (Express) | Cổng 3001 (vì 3000 đã chiếm) |
-| Lần 3 | API khách hàng | Cổng 3002 (vì 3000, 3001 đã chiếm) |
+| 1st | Portfolio (Next.js) | Port 3000 |
+| 2nd | Blog (Express) | Port 3001 (3000 is taken) |
+| 3rd | Customer API | Port 3002 (3000, 3001 are taken) |
 
-Tool sẽ SSH vào VPS, chạy lệnh `ss -tlnp` để quét tất cả cổng đang hoạt động, sau đó tự tìm cổng trống tiếp theo trong dãy 3000-3999 để gán. PM2 sẽ khởi động ứng dụng với biến `PORT=XXXX` tương ứng, đảm bảo mọi thứ luôn khớp hoàn hảo.
+The tool SSHs into the VPS, runs `ss -tlnp` to scan all active ports, then finds the next available port in the 3000-3999 range. PM2 starts the application with the `PORT=XXXX` environment variable, ensuring everything matches perfectly.
 
-## Vấn Đề Bảo Mật (Zero-Trust)
-- **Mật khẩu VPS của bạn an toàn tuyệt đối**. Công cụ không lưu mật khẩu ra file hay gửi lên bất kỳ máy chủ nào.
-- Ngay khi công cụ có được quyền truy cập bằng mật khẩu, nó lập tức đẻ ra một cặp khóa bảo mật **RSA (SSH Keys)**.
-- Public Key được gửi vào VPS.
-- Private Key được nhét vào tính năng lưu trữ khoá bí mật siêu cấp an toàn của Github (Repository Secrets).
-- Cuối cùng quá trình kết nối giữa Github và VPS chỉ sử dụng chiếc "chìa khóa vô hình" này, không bao giờ cần mật khẩu nữa!
+## Security (Zero-Trust)
+- **Your VPS password is absolutely safe**. The tool does not save the password to any file or send it to any server.
+- As soon as the tool gains access via password, it immediately generates an **RSA (SSH Keys)** key pair.
+- The Public Key is sent to the VPS.
+- The Private Key is stored in Github's ultra-secure secret storage (Repository Secrets).
+- From that point on, the connection between Github and VPS only uses this "invisible key" — the password is never needed again!
 
-## Các Lỗi Thường Gặp (FAQ)
+## Frequently Asked Questions (FAQ)
 
-**1. Báo lỗi "Requested name... appears to be a URL" ở Bước 1**
-- **Dấu hiệu:** Công cụ báo lỗi khi đang xin cấp chứng chỉ SSL (Let's Encrypt).
-- **Nguyên nhân:** Khi công cụ hỏi "Nhập Tên Miền (Domain)", bạn đã nhập là `http://domain.com/`. Chứng chỉ SSL Certbot chỉ chấp nhận **tên miền trần** (FQDN - Fully Qualified Domain Name) như `domain.com`. Nó không chấp nhận giao thức `http://` hay dấu `/` ở cuối.
-- **Cách khắc phục:** Chạy lại công cụ và chỉ gõ đúng chữ `domain.com` là xong.
+**1. Error "Requested name... appears to be a URL" at Step 1**
+- **Symptom:** The tool reports an error while requesting an SSL certificate (Let's Encrypt).
+- **Cause:** When the tool asks "Enter Domain Name", you entered `http://domain.com/`. The SSL Certbot only accepts **bare domain names** (FQDN - Fully Qualified Domain Name) like `domain.com`. It does not accept the `http://` protocol or trailing `/`.
+- **Fix:** Re-run the tool and just type `domain.com`.
 
-**2. Báo lỗi "Permission denied" hoặc "cannot be loaded because running scripts is disabled" trên PowerShell**
-- **Dấu hiệu:** Khi chạy lệnh `deploy-vps` hoặc `npm install -g ...`, PowerShell báo lỗi không cho phép chạy script.
-- **Nguyên nhân:** Windows mặc định cấm chạy các script chưa được ký số (Execution Policy = Restricted). Đây là một chính sách bảo mật mặc định của Windows, không phải lỗi của công cụ.
-- **Cách khắc phục:** Mở PowerShell lên và chạy lệnh sau **1 lần duy nhất** (không cần chạy với quyền Admin):
+**2. Error "Permission denied" or "cannot be loaded because running scripts is disabled" on PowerShell**
+- **Symptom:** When running `deploy-vps` or `npm install -g ...`, PowerShell blocks script execution.
+- **Cause:** Windows blocks unsigned scripts by default (Execution Policy = Restricted). This is a default Windows security policy, not a tool bug.
+- **Fix:** Open PowerShell and run this command **once** (no Admin rights required):
   ```powershell
   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
   ```
-  Sau đó chạy lại `deploy-vps` là sẽ hoạt động bình thường. Lệnh này chỉ cần chạy 1 lần, các lần sau không cần chạy lại nữa.
+  Then run `deploy-vps` again. This command only needs to be run once.
 
-**3. Báo lỗi "Permission denied (publickey,password)" ở Bước Deploy trên Github Actions**
-- **Dấu hiệu:** Github Actions báo `rsync error: Permission denied` khi đang copy file sang VPS.
-- **Nguyên nhân:** SSH Key trên VPS không khớp với SSH Key trên Github Secrets. Thường xảy ra khi bạn đã chạy tool nhiều lần hoặc thay đổi VPS.
-- **Cách khắc phục:** Chạy lại `deploy-vps` để tool tự động tạo cặp SSH Key mới và đồng bộ lại cả VPS lẫn Github Secrets.
+**3. Error "Permission denied (publickey,password)" at the Deploy step on Github Actions**
+- **Symptom:** Github Actions reports `rsync error: Permission denied` when copying files to the VPS.
+- **Cause:** The SSH Key on the VPS doesn't match the SSH Key in Github Secrets. This usually happens when you've run the tool multiple times or changed VPS.
+- **Fix:** Re-run `deploy-vps` to let the tool automatically create a new SSH Key pair and sync both the VPS and Github Secrets.
 
-**4. Báo lỗi yêu cầu phiên bản Node.js cao hơn trên Github Actions**
-- **Dấu hiệu:** Bước `npm run build` trên Github Actions bị lỗi với thông báo yêu cầu Node.js phiên bản cao hơn.
-- **Nguyên nhân:** File workflow `.yml` đang dùng phiên bản Node.js cũ.
-- **Cách khắc phục:** Mở file `.github/workflows/deploy.yml`, tìm dòng `node-version` và đổi thành `node-version: '26'`. Sau đó commit và push lại.
+**4. Error requiring a higher Node.js version on Github Actions**
+- **Symptom:** The `npm run build` step on Github Actions fails with a message requiring a higher Node.js version.
+- **Cause:** The workflow `.yml` file is using an outdated Node.js version.
+- **Fix:** Open `.github/workflows/deploy.yml`, find the `node-version` line and change it to `node-version: '26'`. Then commit and push again.
