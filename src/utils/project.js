@@ -71,3 +71,43 @@ export function hasBuildScript(dirAbs) {
         return false;
     }
 }
+
+/**
+ * Tìm dấu hiệu HARDCODE cổng trong source: `.listen(3000)` với số literal.
+ * Trả về mảng số cổng tìm thấy. Bỏ qua `.listen(process.env.PORT ...)` (không có số literal).
+ * Đây là heuristic để CẢNH BÁO, không phải phân tích cú pháp đầy đủ.
+ */
+export function findHardcodedPorts(content) {
+    if (!content) return [];
+    const ports = [];
+    // .listen( theo sau bởi 1 số 2-5 chữ số (vd 3000). Cho phép có khoảng trắng.
+    const re = /\.listen\s*\(\s*(\d{2,5})\b/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        ports.push(parseInt(m[1], 10));
+    }
+    return ports;
+}
+
+/**
+ * Quét nhanh các file entry phổ biến trong thư mục dự án để tìm cổng hardcode.
+ * Trả về mảng { file, port } để cảnh báo. Không đệ quy sâu, bỏ qua node_modules.
+ */
+export function scanHardcodedPorts(dirAbs) {
+    const candidates = [
+        'index.js', 'server.js', 'app.js', 'main.js', 'src/index.js', 'src/server.js',
+        'src/app.js', 'src/main.js', 'index.ts', 'server.ts', 'app.ts', 'main.ts',
+        'src/index.ts', 'src/server.ts', 'src/app.ts', 'src/main.ts'
+    ];
+    const hits = [];
+    for (const rel of candidates) {
+        try {
+            const full = path.join(dirAbs, rel);
+            const content = fs.readFileSync(full, 'utf8');
+            for (const port of findHardcodedPorts(content)) {
+                hits.push({ file: rel, port });
+            }
+        } catch (e) { /* file không tồn tại -> bỏ qua */ }
+    }
+    return hits;
+}

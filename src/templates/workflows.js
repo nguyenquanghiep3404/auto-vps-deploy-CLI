@@ -97,7 +97,11 @@ function getNodeWorkflow(opts) {
     const cleanDir = cleanWorkingDir(workingDir);
     const pm2Name = `app-${domain}`;
     const startCmd = startScript || 'start';
-    const pm2RestartCmd = `PORT=${port} pm2 restart ${pm2Name} || PORT=${port} pm2 start ${cmds.pm2Bin} --name "${pm2Name}" -- ${cmds.pm2Args(startCmd)}`;
+    // --update-env: áp dụng lại biến môi trường (gồm PORT) mỗi lần restart, tránh PM2 giữ env cũ.
+    const pm2RestartCmd = `PORT=${port} pm2 restart ${pm2Name} --update-env || PORT=${port} pm2 start ${cmds.pm2Bin} --name "${pm2Name}" -- ${cmds.pm2Args(startCmd)}`;
+    // Health-check: xác minh app THỰC SỰ nghe cổng được gán. Bắt lỗi hardcode cổng
+    // (vd app.listen(3000) thay vì process.env.PORT) -> báo lỗi rõ ràng thay vì 502 âm thầm.
+    const portHealthCheck = `ok=0; for i in $(seq 1 10); do if ss -tlnH 'sport = :${port}' 2>/dev/null | grep -q .; then ok=1; break; fi; sleep 2; done; if [ "$ok" != 1 ]; then echo "::error::App khong nghe cong ${port} sau ~20s. Rat co the code dang hardcode cong (vd app.listen(3000)) thay vi dung process.env.PORT."; pm2 logs ${pm2Name} --lines 20 --nostream 2>/dev/null; exit 1; fi`;
     const corepackStep = getCorepackStep(cmds);
     const corepackVps = cmds.needCorepack ? 'corepack enable 2>/dev/null || sudo corepack enable 2>/dev/null || true' : '';
 
@@ -124,7 +128,8 @@ function getNodeWorkflow(opts) {
             vpsAppDir !== vpsRoot ? `cd ${vpsAppDir}` : '',
             ...prismaLines,
             pm2RestartCmd,
-            'pm2 save'
+            'pm2 save',
+            portHealthCheck
         ]);
 
         return `name: Deploy Node.js App (Monorepo Workspace)
@@ -182,7 +187,8 @@ ${buildStep}
         cmds.prod,
         ...prismaLines,
         pm2RestartCmd,
-        'pm2 save'
+        'pm2 save',
+        portHealthCheck
     ]);
 
     return `name: Deploy Node.js App

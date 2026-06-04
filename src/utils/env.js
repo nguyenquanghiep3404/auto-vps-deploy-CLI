@@ -119,3 +119,16 @@ export function mergeEnvContent(userContent, generatedLines) {
     if (!base) return block + '\n';
     return base + '\n\n' + block + '\n';
 }
+
+/**
+ * Loại bỏ mọi dòng PORT=... (cổng app) khỏi nội dung .env của người dùng,
+ * để cổng cứng trong .env không đè lên cổng do tool gán.
+ * KHÔNG đụng tới DB_PORT / các biến *_PORT khác (chỉ khớp đúng key "PORT").
+ */
+export function stripAppPort(content) {
+    if (!content) return content;
+    return content
+        .split('\n')
+        .filter(line => !/^[ \t]*PORT[ \t]*=/.test(line))
+        .join('\n');
+}

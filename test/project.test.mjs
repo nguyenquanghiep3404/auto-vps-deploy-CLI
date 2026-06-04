@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { detectPackageManager, detectWorkspace, hasBuildScript } from '../src/utils/project.js';
+import { detectPackageManager, detectWorkspace, hasBuildScript, findHardcodedPorts, scanHardcodedPorts } from '../src/utils/project.js';
 
 let root;
 let sub;
@@ -92,4 +92,26 @@ test('hasBuildScript: true chỉ khi có scripts.build', () => {
     assert.equal(hasBuildScript(sub), false);
 
     assert.equal(hasBuildScript(path.join(root, 'nope')), false);
+});
+
+test('findHardcodedPorts: bắt .listen(số), bỏ qua process.env.PORT', () => {
+    assert.deepEqual(findHardcodedPorts('app.listen(3000)'), [3000]);
+    assert.deepEqual(findHardcodedPorts('server.listen( 8080 )'), [8080]);
+    assert.deepEqual(findHardcodedPorts('app.listen(process.env.PORT || 3000)'), []); // không phải literal đầu tiên
+    assert.deepEqual(findHardcodedPorts('app.listen(PORT)'), []); // biến, không cảnh báo
+    assert.deepEqual(findHardcodedPorts('a.listen(3000)\nb.listen(4000)'), [3000, 4000]);
+    assert.deepEqual(findHardcodedPorts(''), []);
+    assert.deepEqual(findHardcodedPorts(null), []);
+});
+
+test('scanHardcodedPorts: quét file entry phổ biến trong thư mục', () => {
+    touch(root, 'server.js', 'const x=1;\napp.listen(3000);\n');
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    touch(path.join(root, 'src'), 'main.ts', 'await app.listen(process.env.PORT ?? 3000)'); // an toàn -> không báo
+    const hits = scanHardcodedPorts(root);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].file, 'server.js');
+    assert.equal(hits[0].port, 3000);
+    // thư mục không có entry -> rỗng
+    assert.deepEqual(scanHardcodedPorts(path.join(root, 'apps', 'web')), []);
 });

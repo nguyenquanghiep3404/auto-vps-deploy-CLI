@@ -15,9 +15,10 @@ import {
     buildPrismaDatabaseUrl,
     buildLaravelDbEnv,
     envHasKey,
-    mergeEnvContent
+    mergeEnvContent,
+    stripAppPort
 } from '../src/utils/env.js';
-import { detectPackageManager, detectWorkspace, hasBuildScript } from '../src/utils/project.js';
+import { detectPackageManager, detectWorkspace, hasBuildScript, scanHardcodedPorts } from '../src/utils/project.js';
 import { execa, execaCommand } from 'execa';
 import path from 'path';
 
@@ -52,6 +53,21 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
     const repoRoot = process.cwd();
     const cleanDir = (workingDir || './').replace(/^\.\//, '').replace(/\/+$/, '');
     const workDirAbs = cleanDir ? path.join(repoRoot, cleanDir) : repoRoot;
+
+    // ---- Cảnh báo HARDCODE cổng (chỉ app Node chạy PM2) ----
+    // App phải dùng process.env.PORT. Nếu hardcode app.listen(3000), khi lên VPS sẽ lệch
+    // với cổng tool gán -> 502 (nginx proxy tới cổng trống) hoặc EADDRINUSE (đụng dự án khác).
+    if (isNode) {
+        const hardcoded = scanHardcodedPorts(workDirAbs);
+        if (hardcoded.length > 0) {
+            console.log(chalk.yellow.bold('\n   ⚠️  CẢNH BÁO: phát hiện cổng HARDCODE trong source:'));
+            for (const h of hardcoded) {
+                console.log(chalk.yellow(`      • ${h.file}: .listen(${h.port}) — đang dùng số cố định`));
+            }
+            console.log(chalk.yellow('      → App PHẢI dùng process.env.PORT (vd: app.listen(process.env.PORT || 3000)).'));
+            console.log(chalk.yellow('      → Nếu giữ cổng cứng, app sẽ lỗi 502 hoặc đụng cổng dự án khác trên VPS.\n'));
+        }
+    }
 
     // ---- Phiên bản PHP ----
     if (isPhp) {
@@ -592,7 +608,15 @@ async function main() {
                 generatedLines.push(`APP_KEY=${generateLaravelAppKey()}`);
             }
 
-            const envContent = mergeEnvContent(part.envFileContent, generatedLines);
+            // App Node có cổng được gán: loại PORT cứng trong .env của user và chèn PORT do tool gán,
+            // để .env trên VPS không đè ngược cổng (app vẫn phải đọc process.env.PORT trong code).
+            let userEnv = part.envFileContent;
+            if (part.projectType.includes('Node.js') && part.port) {
+                userEnv = stripAppPort(userEnv);
+                generatedLines.push(`PORT=${part.port}`);
+            }
+
+            const envContent = mergeEnvContent(userEnv, generatedLines);
             if (envContent.trim()) {
                 const secretName = isMonorepo ? `ENV_FILE_${sanitizeSecretName(part.name)}` : 'ENV_FILE';
                 await setGithubSecret(secretName, envContent);

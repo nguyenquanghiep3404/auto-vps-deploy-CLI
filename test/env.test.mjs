@@ -13,7 +13,8 @@ import {
     buildPrismaDatabaseUrl,
     buildLaravelDbEnv,
     envHasKey,
-    mergeEnvContent
+    mergeEnvContent,
+    stripAppPort
 } from '../src/utils/env.js';
 
 test('sanitizeSecretName: hợp lệ hoá tên secret', () => {
@@ -103,4 +104,19 @@ test('readEnvFile: đọc file tồn tại, trả null khi thiếu/không phải
     assert.equal(readEnvFile(dir), null); // là thư mục
     assert.equal(readEnvFile(''), null);
     fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('stripAppPort: loại PORT của app nhưng GIỮ DB_PORT và biến khác', () => {
+    const input = 'PORT=3000\nDB_PORT=5432\nNODE_ENV=production\n  PORT = 8080\nSUPPORT=yes\nEXPORT=1';
+    const out = stripAppPort(input);
+    // các dòng PORT=... (kể cả có khoảng trắng) bị loại
+    assert.ok(!/^[ \t]*PORT[ \t]*=/m.test(out), 'không còn dòng PORT=');
+    // không đụng tới DB_PORT / SUPPORT / EXPORT / biến khác
+    assert.match(out, /DB_PORT=5432/);
+    assert.match(out, /NODE_ENV=production/);
+    assert.match(out, /SUPPORT=yes/);
+    assert.match(out, /EXPORT=1/);
+    // an toàn với null/rỗng
+    assert.equal(stripAppPort(null), null);
+    assert.equal(stripAppPort(''), '');
 });

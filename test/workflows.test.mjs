@@ -225,3 +225,25 @@ test('rsync luôn loại trừ .github (không đẩy workflow CI vào webroot)'
         assert.ok(!/--exclude '\.github'\S/.test(c), 'phải có dấu cách sau --exclude \'.github\'');
     }
 });
+
+test('Node single: health-check cổng + pm2 --update-env (chống hardcode cổng)', () => {
+    const { content } = gen({
+        projectType: NODE, domain: 'hc.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3007, envSecretName: undefined, isWorkspace: false,
+        packageManager: 'npm', startScript: 'start', hasBuild: false
+    });
+    assertWellFormed(content);
+    assert.match(content, /pm2 restart app-hc\.com --update-env/);
+    assert.match(content, /sport = :3007/);            // health-check kiểm tra app nghe đúng cổng
+    assert.match(content, /App khong nghe cong 3007/); // thông báo lỗi rõ ràng khi nghi hardcode
+});
+
+test('Node monorepo workspace: cũng có health-check cổng + --update-env', () => {
+    const { content } = gen({
+        projectType: NODE, domain: 'wk.com', role: 'api', workingDir: './apps/api',
+        usePrisma: false, port: 3008, envSecretName: undefined, isWorkspace: true,
+        packageManager: 'npm', startScript: 'start', hasBuild: true
+    });
+    assert.match(content, /sport = :3008/);
+    assert.match(content, /--update-env/);
+});
