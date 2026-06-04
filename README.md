@@ -39,7 +39,7 @@ This release closes the gaps that previously broke apps with a database (e.g. a 
 ## Installation (Global)
 On any computer, just open Terminal (Command Prompt / PowerShell) and run:
 ```bash
-npm install -g git+https://github.com/nguyenquanghiep3404/Automated-VPS-Deployment.git
+npm install -g git+https://github.com/nguyenquanghiep3404/auto-vps-deploy-CLI.git
 ```
 In just about 30 seconds, your computer will have a "DevOps expert" named `deploy-vps`.
 
