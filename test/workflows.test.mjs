@@ -1,0 +1,201 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { generateWorkflowFile } from '../src/templates/workflows.js';
+
+const NODE = 'Node.js (PM2 - Next.js, Express, NestJS...)';
+const LARAVEL = 'PHP (Laravel)';
+const PUREPHP = 'PHP (Thuần)';
+const SPA = 'React/Vite/Vue (SPA)';
+const STATIC = 'Static (HTML thuần)';
+
+/** Sinh workflow trong một thư mục tạm, trả về { file, content }. */
+function gen(opts) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wftest-'));
+    const cwd = process.cwd();
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+        process.chdir(dir);
+        generateWorkflowFile(opts);
+    } finally {
+        process.chdir(cwd);
+        console.log = origLog;
+    }
+    const wfDir = path.join(dir, '.github', 'workflows');
+    const files = fs.readdirSync(wfDir);
+    const content = fs.readFileSync(path.join(wfDir, files[0]), 'utf8');
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { file: files[0], content };
+}
+
+/** Kiểm tra YAML cơ bản: không tab, không 'undefined', có các khối chính. */
+function assertWellFormed(content) {
+    assert.ok(!content.includes('\t'), 'không được có ký tự tab');
+    assert.ok(!content.includes('undefined'), 'không được lọt giá trị undefined');
+    assert.ok(content.startsWith('name:'), 'phải bắt đầu bằng name:');
+    assert.match(content, /^on:/m);
+    assert.match(content, /^jobs:/m);
+    assert.match(content, /steps:/);
+}
+
+test('Node single + npm + Prisma + .env', () => {
+    const { file, content } = gen({
+        projectType: NODE, domain: 'app.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: true, port: 3000, envSecretName: 'ENV_FILE', isWorkspace: false,
+        packageManager: 'npm', startScript: 'start', hasBuild: true
+    });
+    assert.equal(file, 'deploy.yml');
+    assertWellFormed(content);
+    assert.match(content, /run: npm ci/);
+    assert.match(content, /run: npm run build/);
+    assert.match(content, /npx prisma db push --accept-data-loss/);
+    assert.match(content, /pm2 start npm --name "app-app\.com" -- run start/);
+    assert.match(content, /Tạo file \.env từ Github Secret/);
+    assert.match(content, /secrets\.ENV_FILE \}\}/);
+    assert.match(content, /pm2 save/);
+    assert.ok(!content.includes('Enable Corepack'), 'npm không cần corepack');
+    assert.match(content, /PORT=3000/);
+});
+
+test('Node single + pnpm + start:prod (không Prisma, không build script)', () => {
+    const { content } = gen({
+        projectType: NODE, domain: 'p.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3009, envSecretName: 'ENV_FILE', isWorkspace: false,
+        packageManager: 'pnpm', startScript: 'start:prod', hasBuild: false
+    });
+    assertWellFormed(content);
+    assert.match(content, /Enable Corepack \(pnpm\)/);
+    assert.match(content, /run: pnpm install --frozen-lockfile/);
+    assert.match(content, /pnpm install --prod --frozen-lockfile/);
+    assert.match(content, /pm2 start pnpm --name "app-p\.com" -- run start:prod/);
+    assert.match(content, /corepack enable 2>\/dev\/null \|\| sudo corepack enable/);
+    assert.ok(!content.includes('Build Project'), 'không có build script -> không có bước build');
+    assert.ok(!content.includes('npx prisma'), 'không bật Prisma');
+});
+
+test('Node monorepo workspace + npm + Prisma', () => {
+    const { file, content } = gen({
+        projectType: NODE, domain: 'api.com', role: 'api', workingDir: './apps/api',
+        usePrisma: true, port: 3001, envSecretName: 'ENV_FILE_API', isWorkspace: true,
+        packageManager: 'npm', startScript: 'start:prod', hasBuild: true
+    });
+    assert.equal(file, 'deploy-api.yml');
+    assertWellFormed(content);
+    assert.match(content, /Monorepo Workspace/);
+    assert.ok(!content.includes('working-directory'), 'workspace cài ở gốc, không set working-directory');
+    assert.match(content, /printf '%s\\n' "\$ENV_FILE_CONTENT" > apps\/api\/\.env/);
+    assert.match(content, /run: npm ci\n/);
+    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude 'node_modules' \.\/ \$USER@\$HOST:\/var\/www\/api\.com/);
+    assert.match(content, /cd \/var\/www\/api\.com\n/);
+    assert.match(content, /npm ci --production/);
+    assert.match(content, /cd \/var\/www\/api\.com\/apps\/api/);
+    assert.match(content, /pm2 start npm --name "app-api\.com" -- run start:prod/);
+});
+
+test('Node monorepo workspace + pnpm (corepack ở cả runner & VPS)', () => {
+    const { content } = gen({
+        projectType: NODE, domain: 'dp.com', role: 'web', workingDir: './apps/web',
+        usePrisma: true, port: 3002, envSecretName: 'ENV_FILE_WEB', isWorkspace: true,
+        packageManager: 'pnpm', startScript: 'start', hasBuild: true
+    });
+    assertWellFormed(content);
+    assert.match(content, /Enable Corepack \(pnpm\)/);
+    assert.match(content, /run: pnpm install --frozen-lockfile/);
+    assert.match(content, /run: pnpm run build/);
+    assert.match(content, /corepack enable 2>\/dev\/null \|\| sudo corepack enable/);
+    assert.match(content, /pnpm install --prod --frozen-lockfile/);
+    assert.match(content, /pm2 start pnpm/);
+});
+
+test('Node: không có envSecretName -> không có bước tạo .env', () => {
+    const { content } = gen({
+        projectType: NODE, domain: 'plain.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3005, envSecretName: undefined, isWorkspace: false,
+        packageManager: 'npm', startScript: 'start', hasBuild: true
+    });
+    assertWellFormed(content);
+    assert.ok(!content.includes('Tạo file .env'), 'không secret -> không tạo .env');
+});
+
+test('Laravel single, PHP 8.2, key:generate + migrate, không hard-code 8.1', () => {
+    const { file, content } = gen({
+        projectType: LARAVEL, domain: 'shop.com', role: 'Fullstack (Gốc)', workingDir: './',
+        envSecretName: 'ENV_FILE', phpVersion: '8.2'
+    });
+    assert.equal(file, 'deploy.yml');
+    assertWellFormed(content);
+    assert.match(content, /php-version: '8\.2'/);
+    assert.match(content, /php artisan key:generate --force/);
+    assert.match(content, /php artisan migrate --force/);
+    assert.match(content, /pdo_mysql/);
+    assert.match(content, /pdo_pgsql/);
+    assert.ok(!content.includes("php-version: '8.1'"));
+});
+
+test('Laravel monorepo -> tên file & working-directory đúng', () => {
+    const { file, content } = gen({
+        projectType: LARAVEL, domain: 'api.shop.com', role: 'backend', workingDir: './api',
+        envSecretName: 'ENV_FILE_BACKEND', phpVersion: '8.3'
+    });
+    assert.equal(file, 'deploy-backend.yml');
+    assert.match(content, /working-directory: \.\/api/);
+});
+
+test('PHP thuần: có bước tạo .env khi có secret', () => {
+    const { content } = gen({
+        projectType: PUREPHP, domain: 'legacy.com', role: 'Fullstack (Gốc)', workingDir: './',
+        envSecretName: 'ENV_FILE', phpVersion: '8.1'
+    });
+    assertWellFormed(content);
+    assert.match(content, /Tạo file \.env từ Github Secret/);
+    assert.match(content, /rsync -avz --delete/);
+});
+
+test('SPA single + npm: build rồi rsync thư mục dist, .env trước build', () => {
+    const { content } = gen({
+        projectType: SPA, domain: 'spa.com', role: 'Fullstack (Gốc)', workingDir: './',
+        buildDir: 'dist', envSecretName: 'ENV_FILE', isWorkspace: false, packageManager: 'npm'
+    });
+    assertWellFormed(content);
+    assert.match(content, /run: npm run build/);
+    assert.match(content, /rsync -avz --delete --exclude '\.git' dist\/ /);
+    // .env phải đứng TRƯỚC bước build (để Vite/CRA đọc biến lúc build)
+    assert.ok(content.indexOf('Tạo file .env') < content.indexOf('Build Project'));
+});
+
+test('SPA monorepo workspace + yarn', () => {
+    const { file, content } = gen({
+        projectType: SPA, domain: 'fe.com', role: 'frontend', workingDir: './apps/web',
+        buildDir: 'dist', envSecretName: 'ENV_FILE_FE', isWorkspace: true, packageManager: 'yarn'
+    });
+    assert.equal(file, 'deploy-frontend.yml');
+    assertWellFormed(content);
+    assert.match(content, /Monorepo Workspace/);
+    assert.match(content, /Enable Corepack \(yarn\)/);
+    assert.match(content, /run: yarn install --frozen-lockfile/);
+    assert.match(content, /run: yarn build/);
+    assert.match(content, /printf '%s\\n' "\$ENV_FILE_CONTENT" > apps\/web\/\.env/);
+    assert.match(content, /rsync -avz --delete --exclude '\.git' apps\/web\/dist\/ /);
+});
+
+test('Static: không có bước Node/npm', () => {
+    const { file, content } = gen({
+        projectType: STATIC, domain: 's.com', role: 'Fullstack (Gốc)', workingDir: './'
+    });
+    assert.equal(file, 'deploy.yml');
+    assertWellFormed(content);
+    assert.ok(!content.includes('Setup Node.js'));
+    assert.ok(!content.includes('npm'));
+    assert.match(content, /rsync -avz --delete/);
+});
+
+test('Tên file: role "API" -> deploy-api.yml (chữ thường)', () => {
+    const { file } = gen({
+        projectType: STATIC, domain: 'x.com', role: 'API', workingDir: './'
+    });
+    assert.equal(file, 'deploy-api.yml');
+});
