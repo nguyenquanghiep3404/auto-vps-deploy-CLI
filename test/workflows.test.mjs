@@ -89,7 +89,7 @@ test('Node monorepo workspace + npm + Prisma', () => {
     assert.ok(!content.includes('working-directory'), 'workspace cài ở gốc, không set working-directory');
     assert.match(content, /printf '%s\\n' "\$ENV_FILE_CONTENT" > apps\/api\/\.env/);
     assert.match(content, /run: npm ci\n/);
-    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude 'node_modules' \.\/ \$USER@\$HOST:\/var\/www\/api\.com/);
+    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude '\.github' --exclude 'node_modules' \.\/ \$USER@\$HOST:\/var\/www\/api\.com/);
     assert.match(content, /cd \/var\/www\/api\.com\n/);
     assert.match(content, /npm ci --production/);
     assert.match(content, /cd \/var\/www\/api\.com\/apps\/api/);
@@ -162,7 +162,7 @@ test('SPA single + npm: build rồi rsync thư mục dist, .env trước build',
     });
     assertWellFormed(content);
     assert.match(content, /run: npm run build/);
-    assert.match(content, /rsync -avz --delete --exclude '\.git' dist\/ /);
+    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude '\.github' dist\/ /);
     // .env phải đứng TRƯỚC bước build (để Vite/CRA đọc biến lúc build)
     assert.ok(content.indexOf('Tạo file .env') < content.indexOf('Build Project'));
 });
@@ -179,7 +179,7 @@ test('SPA monorepo workspace + yarn', () => {
     assert.match(content, /run: yarn install --frozen-lockfile/);
     assert.match(content, /run: yarn build/);
     assert.match(content, /printf '%s\\n' "\$ENV_FILE_CONTENT" > apps\/web\/\.env/);
-    assert.match(content, /rsync -avz --delete --exclude '\.git' apps\/web\/dist\/ /);
+    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude '\.github' apps\/web\/dist\/ /);
 });
 
 test('Static: không có bước Node/npm', () => {
@@ -198,4 +198,30 @@ test('Tên file: role "API" -> deploy-api.yml (chữ thường)', () => {
         projectType: STATIC, domain: 'x.com', role: 'API', workingDir: './'
     });
     assert.equal(file, 'deploy-api.yml');
+});
+
+test('rsync luôn loại trừ .github (không đẩy workflow CI vào webroot)', () => {
+    // Static: rsync từ gốc repo -> bắt buộc loại trừ cả .git và .github
+    const stat = gen({ projectType: STATIC, domain: 'st.com', role: 'Fullstack (Gốc)', workingDir: './' });
+    assert.match(stat.content, /rsync -avz --delete --exclude '\.git' --exclude '\.github'/);
+
+    // PHP thuần: cũng rsync từ gốc repo
+    const php = gen({
+        projectType: PUREPHP, domain: 'ph.com', role: 'Fullstack (Gốc)', workingDir: './',
+        envSecretName: 'ENV_FILE', phpVersion: '8.1'
+    });
+    assert.match(php.content, /--exclude '\.github'/);
+
+    // Node single: rsync từ gốc repo
+    const node = gen({
+        projectType: NODE, domain: 'nd.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3007, isWorkspace: false, packageManager: 'npm',
+        startScript: 'start', hasBuild: false
+    });
+    assert.match(node.content, /--exclude '\.github'/);
+
+    // Không được lọt ".github'--exclude" hay ".github'$" (lỗi thiếu space khi nối exclude)
+    for (const c of [stat.content, php.content, node.content]) {
+        assert.ok(!/--exclude '\.github'\S/.test(c), 'phải có dấu cách sau --exclude \'.github\'');
+    }
 });

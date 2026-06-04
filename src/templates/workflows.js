@@ -160,7 +160,7 @@ ${buildStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude 'node_modules' ./ $USER@$HOST:${vpsRoot}
+          rsync -avz --delete --exclude '.git' --exclude '.github' --exclude 'node_modules' ./ $USER@$HOST:${vpsRoot}
 
       - name: Restart PM2 & Update DB
         uses: appleboy/ssh-action@master
@@ -218,7 +218,7 @@ ${buildStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude 'node_modules' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' --exclude '.github' --exclude 'node_modules' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 
       - name: Restart PM2 & Update DB
         uses: appleboy/ssh-action@master
@@ -271,7 +271,7 @@ ${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude 'storage/logs' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' --exclude '.github' --exclude 'storage/logs' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 
       - name: Run Migrations & Cache
         uses: appleboy/ssh-action@master
@@ -320,7 +320,7 @@ ${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' --exclude '.github' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 `;
 }
 
@@ -372,7 +372,7 @@ ${corepackStep}${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' ${distPath} $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' --exclude '.github' ${distPath} $USER@$HOST:/var/www/${domain}
 `;
     }
 
@@ -417,7 +417,7 @@ ${corepackStep}${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' --exclude '.github' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 `;
 }
 
@@ -448,7 +448,7 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          rsync -avz --delete --exclude '.git' --exclude '.github' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
 `;
 }
 
