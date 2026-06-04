@@ -4,6 +4,15 @@
 
 Công cụ tự động hóa toàn diện quá trình cấu hình VPS, thiết lập SSL, và tạo Github Actions Workflow. Đặc biệt hỗ trợ tối đa cho các cấu trúc dự án phức tạp như **Monorepo**, **Database Migration** tự động, các web SPA (React, Vite, Vue) và tự động hóa cả Git!
 
+## Mới — Tự Nhận Diện Dự Án 🔍
+Tool tự quét repo **trước khi hỏi** để đoán sẵn cấu trúc và loại từng phần, bạn chỉ việc Enter để xác nhận (hoặc sửa nếu sai):
+
+- **Cấu trúc Single / Monorepo**: Dựa vào `package.json` `workspaces`, `pnpm-workspace.yaml`, `turbo.json`, hoặc các thư mục con quen thuộc (`frontend`, `backend`, `apps/*`, `packages/*`...). Nếu là Monorepo, tool **liệt kê sẵn từng phần** kèm tên + thư mục.
+- **Loại dự án (backend/frontend)**: Phân biệt **Node.js (PM2)** vs **React/Vite/Vue (SPA)** theo dependencies trong `package.json` (có `express`/`next`/`nest` → server PM2; có `vite`/`react`/`vue` mà không có server → SPA tĩnh); nhận diện **Laravel** (`artisan` + `laravel/framework`), **PHP thuần** (`composer.json`/file `.php`), và **Static** (chỉ `index.html`).
+- **Chi tiết phụ**: Đoán luôn `buildDir` (đọc `outDir` trong `vite.config`), `start:prod` cho NestJS, có dùng **Prisma** không, và **phiên bản PHP** (từ `composer.json` `require.php`).
+
+> Mọi kết quả chỉ là **gợi ý điền sẵn** — bạn luôn có toàn quyền sửa ở từng bước. Đoán sai cũng không sao.
+
 ## Mới Trong Version 6 — Database & Biến Môi Trường 🆕
 Phiên bản này vá những "lỗ hổng" trước đây làm hỏng các app có database (ví dụ app quán cafe có đặt món + đăng nhập + DB):
 

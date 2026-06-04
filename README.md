@@ -4,6 +4,15 @@
 
 A comprehensive automation tool for VPS configuration, SSL setup, and Github Actions Workflow generation. With special support for complex project structures like **Monorepo**, automatic **Database Migration**, SPA web apps (React, Vite, Vue), and full Git automation!
 
+## New — Automatic Project Detection 🔍
+The tool scans your repo **before asking questions** to pre-fill the project structure and the type of each part — just press Enter to confirm (or change it if it's wrong):
+
+- **Single / Monorepo structure**: Detected from `package.json` `workspaces`, `pnpm-workspace.yaml`, `turbo.json`, or common subfolders (`frontend`, `backend`, `apps/*`, `packages/*`...). For a Monorepo it **lists every part** with its name + directory.
+- **Project type (backend/frontend)**: Distinguishes **Node.js (PM2)** vs **React/Vite/Vue (SPA)** from the `package.json` dependencies (`express`/`next`/`nest` → PM2 server; `vite`/`react`/`vue` with no server → static SPA); also detects **Laravel** (`artisan` + `laravel/framework`), **plain PHP** (`composer.json`/`.php` files), and **Static** (`index.html` only).
+- **Extra details**: Also guesses `buildDir` (reads `outDir` from `vite.config`), `start:prod` for NestJS, whether **Prisma** is used, and the **PHP version** (from `composer.json` `require.php`).
+
+> Everything is only a **pre-filled suggestion** — you always keep full control to change it at every step. A wrong guess is harmless.
+
 ## New in Version 6 — Database & Environment Variables 🆕
 This release closes the gaps that previously broke apps with a database (e.g. a cafe ordering app with login + DB):
 

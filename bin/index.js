@@ -19,6 +19,7 @@ import {
     stripAppPort
 } from '../src/utils/env.js';
 import { detectPackageManager, detectWorkspace, hasBuildScript, scanHardcodedPorts, scanLocalhostUrls, findLocalhostUrls } from '../src/utils/project.js';
+import { detectProject } from '../src/utils/detect.js';
 import { execa, execaCommand } from 'execa';
 import path from 'path';
 
@@ -45,7 +46,7 @@ function validateDomain(input) {
  * - Database (với Node/Laravel/PHP thuần)
  * - File .env local cần nạp (với mọi loại trừ Static)
  */
-async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonorepo, partName }) {
+async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonorepo, partName, detectedPhpVersion, detectedStartScript }) {
     const extras = {
         phpVersion: null,
         database: null,
@@ -109,8 +110,10 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
         const { phpVersion } = await inquirer.prompt([{
             type: 'input',
             name: 'phpVersion',
-            message: 'Phiên bản PHP cần cài/dùng trên VPS (vd: 8.1, 8.2, 8.3):',
-            default: '8.3',
+            message: detectedPhpVersion
+                ? `Phiên bản PHP cần cài/dùng trên VPS (tự phát hiện từ composer.json: ${detectedPhpVersion}):`
+                : 'Phiên bản PHP cần cài/dùng trên VPS (vd: 8.1, 8.2, 8.3):',
+            default: detectedPhpVersion || '8.3',
             validate: input => /^\d+\.\d+$/.test(input.trim()) ? true : 'Định dạng phải dạng X.Y, ví dụ 8.3'
         }]);
         extras.phpVersion = phpVersion.trim();
@@ -147,7 +150,7 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
             type: 'input',
             name: 'startScript',
             message: 'Script chạy production của app (vd: start, start:prod):',
-            default: 'start'
+            default: detectedStartScript || 'start'
         }]);
         extras.startScript = (startScript || '').trim() || 'start';
     }
@@ -345,16 +348,34 @@ async function main() {
     const { vpsHost, vpsUser, vpsPassword } = vpsInfo;
 
     // ========================================
-    // 3. Hỏi cấu trúc dự án: Single hay Monorepo
+    // 3. Tự nhận diện cấu trúc & loại dự án (đoán + cho người dùng xác nhận)
     // ========================================
+    const SINGLE_CHOICE = 'Single (Dự án đơn - 1 loại dự án duy nhất)';
+    const MONOREPO_CHOICE = 'Monorepo (Nhiều phần trong 1 repo - VD: frontend + backend)';
+
+    const detected = detectProject(process.cwd());
+    console.log(chalk.cyan.bold('\n🔍 Kết quả tự nhận diện dự án:'));
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log(chalk.white(`  • Cấu trúc: ${chalk.bold(detected.isMonorepo ? 'Monorepo' : 'Single')}`));
+    detected.parts.forEach(p => {
+        const type = p.projectType || chalk.gray('(không rõ — vui lòng chọn tay)');
+        const extra = [
+            p.buildDir ? `build: ${p.buildDir}` : null,
+            p.startScript && p.startScript !== 'start' ? `script: ${p.startScript}` : null,
+            p.usePrisma ? 'Prisma' : null,
+            p.phpVersion ? `PHP ${p.phpVersion}` : null
+        ].filter(Boolean).join(', ');
+        console.log(chalk.white(`  • ${chalk.bold(p.name)} (${p.workingDir}): ${type}${extra ? chalk.gray(' — ' + extra) : ''}`));
+    });
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log(chalk.gray('Bạn có thể giữ nguyên (Enter) hoặc sửa lại ở từng bước phía dưới.\n'));
+
     const { projectStructure } = await inquirer.prompt([{
         type: 'rawlist',
         name: 'projectStructure',
         message: 'Cấu trúc dự án của bạn là gì?',
-        choices: [
-            'Single (Dự án đơn - 1 loại dự án duy nhất)',
-            'Monorepo (Nhiều phần trong 1 repo - VD: frontend + backend)'
-        ]
+        choices: [SINGLE_CHOICE, MONOREPO_CHOICE],
+        default: detected.isMonorepo ? MONOREPO_CHOICE : SINGLE_CHOICE
     }]);
 
     const isMonorepo = projectStructure.includes('Monorepo');
@@ -378,7 +399,8 @@ async function main() {
     const parts = []; // Mảng chứa cấu hình của từng phần
 
     if (!isMonorepo) {
-        // ---- LUỒNG SINGLE: Giữ nguyên logic cũ ----
+        // ---- LUỒNG SINGLE: dùng kết quả tự nhận diện thư mục gốc làm gợi ý ----
+        const det = detected.root;
         const singleAnswers = await inquirer.prompt([
             {
                 type: 'input',
@@ -389,27 +411,30 @@ async function main() {
             {
                 type: 'rawlist',
                 name: 'projectType',
-                message: 'Chọn loại dự án của bạn:',
+                message: det.projectType
+                    ? `Chọn loại dự án của bạn (tự phát hiện: ${det.projectType}):`
+                    : 'Chọn loại dự án của bạn:',
                 choices: [
                     'Node.js (PM2 - Next.js, Express, NestJS...)',
                     'PHP (Laravel)',
                     'PHP (Thuần)',
                     'React/Vite/Vue (SPA)',
                     'Static (HTML thuần)'
-                ]
+                ],
+                default: det.projectType || undefined
             },
             {
                 type: 'input',
                 name: 'buildDir',
                 message: 'Thư mục output sau khi build của dự án tên là gì? (Ví dụ: dist, build)',
-                default: 'dist',
+                default: det.buildDir || 'dist',
                 when: (a) => a.projectType === 'React/Vite/Vue (SPA)'
             },
             {
                 type: 'confirm',
                 name: 'usePrisma',
                 message: 'Bạn có sử dụng Prisma ORM để quản lý Database không?',
-                default: false,
+                default: det.usePrisma || false,
                 when: (a) => a.projectType.includes('Node.js')
             }
         ]);
@@ -429,7 +454,9 @@ async function main() {
             workingDir: './',
             defaultEnvPath: '.env',
             isMonorepo: false,
-            partName: 'app'
+            partName: 'app',
+            detectedPhpVersion: det.phpVersion,
+            detectedStartScript: det.startScript
         });
 
         parts.push({
@@ -451,11 +478,12 @@ async function main() {
 
     } else {
         // ---- LUỒNG MONOREPO: Hỏi từng phần ----
+        const detectedParts = detected.isMonorepo ? detected.parts : [];
         const { partCount } = await inquirer.prompt([{
             type: 'input',
             name: 'partCount',
             message: 'Dự án Monorepo của bạn có bao nhiêu phần? (Ví dụ: 2 cho frontend + backend)',
-            default: '2',
+            default: detectedParts.length >= 2 ? String(detectedParts.length) : '2',
             validate: input => {
                 const num = parseInt(input);
                 if (isNaN(num) || num < 2 || num > 10) return 'Vui lòng nhập số từ 2 đến 10';
@@ -468,12 +496,15 @@ async function main() {
         for (let i = 1; i <= count; i++) {
             console.log(chalk.cyan.bold(`\n📦 ──── Cấu hình cho PHẦN ${i}/${count} ────`));
 
+            // Gợi ý từ kết quả tự nhận diện (nếu có phần tương ứng).
+            const det = detectedParts[i - 1] || {};
+
             const partAnswers = await inquirer.prompt([
                 {
                     type: 'input',
                     name: 'partName',
                     message: `Tên của phần ${i} là gì? (Dùng để đặt tên file workflow, VD: frontend, backend, admin)`,
-                    default: i === 1 ? 'frontend' : (i === 2 ? 'backend' : `part-${i}`),
+                    default: det.name || (i === 1 ? 'frontend' : (i === 2 ? 'backend' : `part-${i}`)),
                     validate: input => input ? true : 'Không được để trống'
                 },
                 {
@@ -485,34 +516,37 @@ async function main() {
                 {
                     type: 'rawlist',
                     name: 'projectType',
-                    message: `Loại dự án cho phần này:`,
+                    message: det.projectType
+                        ? `Loại dự án cho phần này (tự phát hiện: ${det.projectType}):`
+                        : `Loại dự án cho phần này:`,
                     choices: [
                         'Node.js (PM2 - Next.js, Express, NestJS...)',
                         'PHP (Laravel)',
                         'PHP (Thuần)',
                         'React/Vite/Vue (SPA)',
                         'Static (HTML thuần)'
-                    ]
+                    ],
+                    default: det.projectType || undefined
                 },
                 {
                     type: 'input',
                     name: 'buildDir',
                     message: 'Thư mục output sau khi build tên là gì? (Ví dụ: dist, build)',
-                    default: 'dist',
+                    default: det.buildDir || 'dist',
                     when: (a) => a.projectType === 'React/Vite/Vue (SPA)'
                 },
                 {
                     type: 'confirm',
                     name: 'usePrisma',
                     message: 'Phần này có sử dụng Prisma ORM không?',
-                    default: false,
+                    default: det.usePrisma || false,
                     when: (a) => a.projectType.includes('Node.js')
                 },
                 {
                     type: 'input',
                     name: 'workingDir',
                     message: `Thư mục mã nguồn của phần này nằm ở đâu trong Repository?`,
-                    default: i === 1 ? './frontend' : (i === 2 ? './backend' : `./part-${i}`),
+                    default: det.workingDir || (i === 1 ? './frontend' : (i === 2 ? './backend' : `./part-${i}`)),
                     validate: input => input ? true : 'Không được để trống'
                 }
             ]);
@@ -535,7 +569,9 @@ async function main() {
                 workingDir: partAnswers.workingDir,
                 defaultEnvPath,
                 isMonorepo: true,
-                partName: partAnswers.partName
+                partName: partAnswers.partName,
+                detectedPhpVersion: det.phpVersion,
+                detectedStartScript: det.startScript
             });
 
             parts.push({
