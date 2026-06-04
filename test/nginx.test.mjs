@@ -11,7 +11,7 @@ const STATIC = 'Static (HTML thuần)';
 
 test('Node: reverse proxy tới đúng cổng, không có PHP', () => {
     const c = generateNginxConfig('app.com', NODE, 3001, null);
-    assert.match(c, /proxy_pass http:\/\/localhost:3001;/);
+    assert.match(c, /proxy_pass http:\/\/127\.0\.0\.1:3001;/);
     assert.match(c, /server_name app\.com;/);
     assert.ok(!c.includes('fastcgi_pass'));
 });
@@ -44,4 +44,17 @@ test('SPA: try_files fallback về index.html (xử lý F5 routing)', () => {
 test('Static: try_files trả =404', () => {
     const c = generateNginxConfig('s.com', STATIC, undefined, null);
     assert.match(c, /try_files \$uri \$uri\/ =404;/);
+});
+
+test('client_max_body_size có trong mọi loại (tránh lỗi 413 khi upload)', () => {
+    for (const t of [NODE, LARAVEL, PUREPHP, SPA, STATIC]) {
+        const c = generateNginxConfig('d.com', t, 3001, '/run/php/php8.3-fpm.sock');
+        assert.match(c, /client_max_body_size 50M;/, `thiếu client_max_body_size cho ${t}`);
+    }
+});
+
+test('Node: proxy_pass dùng 127.0.0.1 (tránh lỗi IPv6 ::1 -> 502)', () => {
+    const c = generateNginxConfig('app.com', NODE, 3005, null);
+    assert.match(c, /proxy_pass http:\/\/127\.0\.0\.1:3005;/);
+    assert.ok(!c.includes('localhost'), 'không còn dùng localhost');
 });

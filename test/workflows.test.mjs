@@ -88,8 +88,9 @@ test('Node monorepo workspace + npm + Prisma', () => {
     assert.match(content, /Monorepo Workspace/);
     assert.ok(!content.includes('working-directory'), 'workspace cài ở gốc, không set working-directory');
     assert.match(content, /printf '%s\\n' "\$ENV_FILE_CONTENT" > apps\/api\/\.env/);
-    assert.match(content, /run: npm ci\n/);
-    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude '\.github' --exclude 'node_modules' \.\/ \$USER@\$HOST:\/var\/www\/api\.com/);
+    assert.match(content, /run: npm ci \|\| npm install/);
+    assert.match(content, /--exclude 'node_modules' \.\/ \$USER@\$HOST:\/var\/www\/api\.com/);
+    assert.match(content, /--filter='P \.env'/); // bảo vệ .env khỏi --delete
     assert.match(content, /cd \/var\/www\/api\.com\n/);
     assert.match(content, /npm ci --production/);
     assert.match(content, /cd \/var\/www\/api\.com\/apps\/api/);
@@ -162,7 +163,7 @@ test('SPA single + npm: build rồi rsync thư mục dist, .env trước build',
     });
     assertWellFormed(content);
     assert.match(content, /run: npm run build/);
-    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude '\.github' dist\/ /);
+    assert.match(content, /dist\/ \$USER@\$HOST:\/var\/www\/spa\.com/);
     // .env phải đứng TRƯỚC bước build (để Vite/CRA đọc biến lúc build)
     assert.ok(content.indexOf('Tạo file .env') < content.indexOf('Build Project'));
 });
@@ -179,7 +180,7 @@ test('SPA monorepo workspace + yarn', () => {
     assert.match(content, /run: yarn install --frozen-lockfile/);
     assert.match(content, /run: yarn build/);
     assert.match(content, /printf '%s\\n' "\$ENV_FILE_CONTENT" > apps\/web\/\.env/);
-    assert.match(content, /rsync -avz --delete --exclude '\.git' --exclude '\.github' apps\/web\/dist\/ /);
+    assert.match(content, /apps\/web\/dist\/ \$USER@\$HOST:\/var\/www\/fe\.com/);
 });
 
 test('Static: không có bước Node/npm', () => {
@@ -246,4 +247,37 @@ test('Node monorepo workspace: cũng có health-check cổng + --update-env', ()
     });
     assert.match(content, /sport = :3008/);
     assert.match(content, /--update-env/);
+});
+
+test('rsync bảo toàn dữ liệu runtime: protect .env + uploads (B1/B2)', () => {
+    const cases = [
+        { projectType: STATIC, domain: 's.com', role: 'Fullstack (Gốc)', workingDir: './' },
+        { projectType: PUREPHP, domain: 'p.com', role: 'Fullstack (Gốc)', workingDir: './', envSecretName: 'ENV_FILE', phpVersion: '8.1' },
+        { projectType: NODE, domain: 'n.com', role: 'Fullstack (Gốc)', workingDir: './', usePrisma: false, port: 3001, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: false }
+    ];
+    for (const t of cases) {
+        const { content } = gen(t);
+        assert.match(content, /--filter='P \.env'/, `${t.projectType}: phải protect .env`);
+        assert.match(content, /--filter='P uploads'/, `${t.projectType}: phải protect uploads`);
+    }
+});
+
+test('Laravel: KHÔNG xóa storage + tạo sẵn cấu trúc (tránh mất upload + reset APP_KEY)', () => {
+    const { content } = gen({
+        projectType: LARAVEL, domain: 'shop.com', role: 'Fullstack (Gốc)', workingDir: './',
+        envSecretName: 'ENV_FILE', phpVersion: '8.2'
+    });
+    assert.match(content, /--filter='P storage'/);               // không xóa storage -> upload sống sót
+    assert.match(content, /mkdir -p storage\/framework\/cache/);  // tạo cấu trúc trên server
+    assert.match(content, /--filter='P \.env'/);                  // .env không bị xóa/reset
+});
+
+test('Node version build = runtime (22) và npm ci có fallback', () => {
+    const { content } = gen({
+        projectType: NODE, domain: 'v.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3002, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true
+    });
+    assert.match(content, /node-version: '22'/);
+    assert.ok(!content.includes("node-version: '26'"), 'không còn Node 26');
+    assert.match(content, /npm ci \|\| npm install/);
 });

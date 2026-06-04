@@ -28,8 +28,8 @@ function pmCommands(packageManager) {
         return {
             pm: 'pnpm',
             needCorepack: true,
-            ci: 'pnpm install --frozen-lockfile',
-            prod: 'pnpm install --prod --frozen-lockfile',
+            ci: 'pnpm install --frozen-lockfile || pnpm install',
+            prod: 'pnpm install --prod --frozen-lockfile || pnpm install --prod',
             run: (s) => `pnpm run ${s}`,
             pm2Bin: 'pnpm',
             pm2Args: (s) => `run ${s}`
@@ -39,7 +39,7 @@ function pmCommands(packageManager) {
         return {
             pm: 'yarn',
             needCorepack: true,
-            ci: 'yarn install --frozen-lockfile',
+            ci: 'yarn install --frozen-lockfile || yarn install',
             prod: 'yarn install --production',
             run: (s) => `yarn ${s}`,
             pm2Bin: 'yarn',
@@ -49,8 +49,8 @@ function pmCommands(packageManager) {
     return {
         pm: 'npm',
         needCorepack: false,
-        ci: 'npm ci',
-        prod: 'npm ci --production',
+        ci: 'npm ci || npm install',
+        prod: 'npm ci --production || npm install --production',
         run: (s) => `npm run ${s}`,
         pm2Bin: 'npm',
         pm2Args: (s) => `run ${s}`
@@ -89,6 +89,24 @@ function getEnvStep(envSecretName, target = '.env') {
  */
 function joinVpsScript(lines) {
     return lines.filter(Boolean).join('\n            ');
+}
+
+/**
+ * Sinh lệnh rsync triển khai AN TOÀN cho dữ liệu runtime.
+ * Vẫn dùng --delete để dọn file build cũ, NHƯNG bảo vệ (filter 'P') .env và các thư mục
+ * upload phổ biến khỏi bị xóa — mọi file người dùng/dữ liệu không có trong repo sẽ KHÔNG bị xóa nhầm.
+ *   src, dest: nguồn & đích. extra: mảng cờ bổ sung theo loại dự án (vd node_modules, storage).
+ */
+function buildRsync(src, dest, extra = []) {
+    const flags = [
+        '-avz', '--delete',
+        "--exclude '.git'", "--exclude '.github'",
+        "--filter='P .env'",            // không xóa .env trên server (vẫn cập nhật khi repo có)
+        "--filter='P uploads'",         // dữ liệu upload phổ biến
+        "--filter='P public/uploads'",
+        ...extra
+    ].join(' ');
+    return `rsync ${flags} ${src} $USER@$HOST:${dest}`;
 }
 
 function getNodeWorkflow(opts) {
@@ -150,7 +168,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '26'
+          node-version: '22'
 ${corepackStep}${envStep}
       - name: Install Dependencies (workspace root)
         run: ${cmds.ci}
@@ -165,7 +183,7 @@ ${buildStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude '.github' --exclude 'node_modules' ./ $USER@$HOST:${vpsRoot}
+          ${buildRsync('./', vpsRoot, ["--exclude 'node_modules'"])}
 
       - name: Restart PM2 & Update DB
         uses: appleboy/ssh-action@master
@@ -209,7 +227,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '26'
+          node-version: '22'
 ${corepackStep}${envStep}
       - name: Install Dependencies
         run: ${cmds.ci}
@@ -224,7 +242,7 @@ ${buildStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude '.github' --exclude 'node_modules' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          ${buildRsync(rsyncSrc, '/var/www/' + domain, ["--exclude 'node_modules'"])}
 
       - name: Restart PM2 & Update DB
         uses: appleboy/ssh-action@master
@@ -277,7 +295,7 @@ ${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude '.github' --exclude 'storage/logs' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          ${buildRsync(rsyncSrc, '/var/www/' + domain, ["--exclude 'storage/logs'", "--filter='P storage'"])}
 
       - name: Run Migrations & Cache
         uses: appleboy/ssh-action@master
@@ -287,6 +305,7 @@ ${envStep}
           key: \${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /var/www/${domain}
+            mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs storage/app/public bootstrap/cache
             test -f .env || cp -n .env.example .env 2>/dev/null || true
             grep -q "^APP_KEY=base64" .env 2>/dev/null || php artisan key:generate --force
             php artisan migrate --force
@@ -326,7 +345,7 @@ ${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude '.github' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          ${buildRsync(rsyncSrc, '/var/www/' + domain)}
 `;
 }
 
@@ -360,7 +379,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '26'
+          node-version: '22'
 ${corepackStep}${envStep}
       - name: Install Dependencies (workspace root)
         run: ${cmds.ci}
@@ -378,7 +397,7 @@ ${corepackStep}${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude '.github' ${distPath} $USER@$HOST:/var/www/${domain}
+          ${buildRsync(distPath, '/var/www/' + domain)}
 `;
     }
 
@@ -405,7 +424,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '26'
+          node-version: '22'
 ${corepackStep}${envStep}
       - name: Install Dependencies
         run: ${cmds.ci}
@@ -423,7 +442,7 @@ ${corepackStep}${envStep}
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude '.github' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          ${buildRsync(rsyncSrc, '/var/www/' + domain)}
 `;
 }
 
@@ -454,7 +473,7 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
-          rsync -avz --delete --exclude '.git' --exclude '.github' ${rsyncSrc} $USER@$HOST:/var/www/${domain}
+          ${buildRsync(rsyncSrc, '/var/www/' + domain)}
 `;
 }
 

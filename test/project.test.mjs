@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { detectPackageManager, detectWorkspace, hasBuildScript, findHardcodedPorts, scanHardcodedPorts } from '../src/utils/project.js';
+import { detectPackageManager, detectWorkspace, hasBuildScript, findHardcodedPorts, scanHardcodedPorts, findLocalhostUrls, scanLocalhostUrls } from '../src/utils/project.js';
 
 let root;
 let sub;
@@ -114,4 +114,21 @@ test('scanHardcodedPorts: quét file entry phổ biến trong thư mục', () =>
     assert.equal(hits[0].port, 3000);
     // thư mục không có entry -> rỗng
     assert.deepEqual(scanHardcodedPorts(path.join(root, 'apps', 'web')), []);
+});
+
+test('findLocalhostUrls: bắt URL localhost/127.0.0.1, bỏ qua URL thật', () => {
+    assert.deepEqual(findLocalhostUrls('const API="http://localhost:5000/api"'), ['http://localhost:5000']);
+    assert.deepEqual(findLocalhostUrls('fetch("https://127.0.0.1:8080/x")'), ['https://127.0.0.1:8080']);
+    assert.deepEqual(findLocalhostUrls('axios.get("https://api.example.com")'), []);
+    assert.deepEqual(findLocalhostUrls('a http://localhost b http://127.0.0.1:3000'), ['http://localhost', 'http://127.0.0.1:3000']);
+    assert.deepEqual(findLocalhostUrls(''), []);
+    assert.deepEqual(findLocalhostUrls(null), []);
+});
+
+test('scanLocalhostUrls: quét file entry tìm URL localhost', () => {
+    touch(root, 'app.js', 'const base = "http://localhost:5000";\n');
+    const hits = scanLocalhostUrls(root);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].file, 'app.js');
+    assert.equal(hits[0].url, 'http://localhost:5000');
 });

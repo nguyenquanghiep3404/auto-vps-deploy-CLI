@@ -57,8 +57,8 @@ export async function installPublicKeyToVPS(host, username, password, publicKey)
         // Đảm bảo thư mục .ssh tồn tại
         await ssh.execCommand('mkdir -p ~/.ssh && chmod 700 ~/.ssh');
         
-        // Thêm public key vào authorized_keys
-        const result = await ssh.execCommand(`echo "${publicKey}" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`);
+        // Thêm public key vào authorized_keys — CHỈ khi chưa có (tránh file phình to khi chạy lại nhiều lần).
+        const result = await ssh.execCommand(`touch ~/.ssh/authorized_keys; grep -qxF "${publicKey}" ~/.ssh/authorized_keys || echo "${publicKey}" >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys`);
         
         if (result.stderr) {
             console.error('Lỗi khi thêm SSH Key:', result.stderr);

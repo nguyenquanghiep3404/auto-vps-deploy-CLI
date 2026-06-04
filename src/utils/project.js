@@ -89,25 +89,44 @@ export function findHardcodedPorts(content) {
     return ports;
 }
 
-/**
- * Quét nhanh các file entry phổ biến trong thư mục dự án để tìm cổng hardcode.
- * Trả về mảng { file, port } để cảnh báo. Không đệ quy sâu, bỏ qua node_modules.
- */
-export function scanHardcodedPorts(dirAbs) {
-    const candidates = [
-        'index.js', 'server.js', 'app.js', 'main.js', 'src/index.js', 'src/server.js',
-        'src/app.js', 'src/main.js', 'index.ts', 'server.ts', 'app.ts', 'main.ts',
-        'src/index.ts', 'src/server.ts', 'src/app.ts', 'src/main.ts'
-    ];
+// Các file entry phổ biến để quét nhanh (không đệ quy sâu, bỏ qua node_modules).
+const ENTRY_CANDIDATES = [
+    'index.js', 'server.js', 'app.js', 'main.js', 'src/index.js', 'src/server.js',
+    'src/app.js', 'src/main.js', 'index.ts', 'server.ts', 'app.ts', 'main.ts',
+    'src/index.ts', 'src/server.ts', 'src/app.ts', 'src/main.ts'
+];
+
+function scanEntryFiles(dirAbs, fn) {
     const hits = [];
-    for (const rel of candidates) {
+    for (const rel of ENTRY_CANDIDATES) {
         try {
-            const full = path.join(dirAbs, rel);
-            const content = fs.readFileSync(full, 'utf8');
-            for (const port of findHardcodedPorts(content)) {
-                hits.push({ file: rel, port });
-            }
+            const content = fs.readFileSync(path.join(dirAbs, rel), 'utf8');
+            for (const item of fn(content)) hits.push({ file: rel, ...item });
         } catch (e) { /* file không tồn tại -> bỏ qua */ }
     }
     return hits;
+}
+
+/**
+ * Quét nhanh các file entry để tìm cổng hardcode. Trả về [{ file, port }].
+ */
+export function scanHardcodedPorts(dirAbs) {
+    return scanEntryFiles(dirAbs, (c) => findHardcodedPorts(c).map(port => ({ port })));
+}
+
+/**
+ * Tìm URL trỏ localhost/127.0.0.1 trong source (vd API base bị hardcode).
+ * Trả về mảng URL. Heuristic để CẢNH BÁO (giống lỗi hardcode cổng nhưng cho URL).
+ */
+export function findLocalhostUrls(content) {
+    if (!content) return [];
+    const re = /https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?/gi;
+    return content.match(re) || [];
+}
+
+/**
+ * Quét file entry tìm URL localhost hardcode. Trả về [{ file, url }].
+ */
+export function scanLocalhostUrls(dirAbs) {
+    return scanEntryFiles(dirAbs, (c) => findLocalhostUrls(c).map(url => ({ url })));
 }

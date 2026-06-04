@@ -18,9 +18,25 @@ import {
     mergeEnvContent,
     stripAppPort
 } from '../src/utils/env.js';
-import { detectPackageManager, detectWorkspace, hasBuildScript, scanHardcodedPorts } from '../src/utils/project.js';
+import { detectPackageManager, detectWorkspace, hasBuildScript, scanHardcodedPorts, scanLocalhostUrls, findLocalhostUrls } from '../src/utils/project.js';
 import { execa, execaCommand } from 'execa';
 import path from 'path';
+
+/**
+ * Validate tên miền: chỉ chấp nhận domain trần (vd example.com, app.example.com).
+ * Chặn http(s)://, dấu '/', khoảng trắng — tránh tạo config nginx hỏng / lỗi đường dẫn / inject.
+ */
+function validateDomain(input) {
+    const v = (input || '').trim();
+    if (!v) return 'Không được để trống';
+    if (/^https?:\/\//i.test(v) || v.includes('/') || /\s/.test(v)) {
+        return 'Chỉ nhập tên miền trần (vd: example.com), KHÔNG có http:// hoặc /';
+    }
+    if (!/^(?!-)[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})+$/.test(v)) {
+        return 'Tên miền không hợp lệ (vd: example.com hoặc app.example.com)';
+    }
+    return true;
+}
 
 /**
  * Hỏi thêm các cấu hình nâng cao cho một "phần" của dự án:
@@ -66,6 +82,25 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
             }
             console.log(chalk.yellow('      → App PHẢI dùng process.env.PORT (vd: app.listen(process.env.PORT || 3000)).'));
             console.log(chalk.yellow('      → Nếu giữ cổng cứng, app sẽ lỗi 502 hoặc đụng cổng dự án khác trên VPS.\n'));
+        }
+    }
+
+    // ---- Cảnh báo HARDCODE URL localhost (Node & SPA) ----
+    // Giống lỗi cổng: URL localhost chỉ đúng ở máy dev; lên VPS sẽ gọi sai địa chỉ (lỗi kết nối/CORS).
+    if (isJs) {
+        const urlHits = scanLocalhostUrls(workDirAbs);
+        if (urlHits.length > 0) {
+            console.log(chalk.yellow.bold('\n   ⚠️  CẢNH BÁO: phát hiện URL localhost HARDCODE trong source:'));
+            const seen = new Set();
+            for (const h of urlHits) {
+                const k = h.file + ' ' + h.url;
+                if (seen.has(k)) continue;
+                seen.add(k);
+                console.log(chalk.yellow(`      • ${h.file}: ${h.url}`));
+            }
+            console.log(chalk.yellow(isSpa
+                ? '      → SPA: dùng biến build-time (VITE_*/REACT_APP_*) cho API base, KHÔNG hardcode localhost.\n'
+                : '      → Dùng biến môi trường cho URL dịch vụ thay vì hardcode localhost.\n'));
         }
     }
 
@@ -183,6 +218,13 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
                 extras.envFileContent = content;
                 extras.envFilePath = trimmed;
                 console.log(chalk.green(`   ✅ Đã đọc file .env (${content.split('\n').length} dòng).`));
+                const envLocalhost = [...new Set(findLocalhostUrls(content))];
+                if (envLocalhost.length > 0) {
+                    console.log(chalk.yellow(`   ⚠️  .env chứa URL localhost: ${envLocalhost.join(', ')}`));
+                    console.log(chalk.yellow(isSpa
+                        ? '      → Biến build-time này sẽ bị "nướng" vào bản build và trỏ localhost trên production. Đổi sang domain thật trước khi deploy.'
+                        : '      → Trên VPS biến này vẫn trỏ localhost. Cân nhắc đổi sang địa chỉ thật.'));
+                }
             }
         }
     }
@@ -342,7 +384,7 @@ async function main() {
                 type: 'input',
                 name: 'domain',
                 message: 'Nhập Tên Miền (Domain) của dự án:',
-                validate: input => input ? true : 'Không được để trống'
+                validate: validateDomain
             },
             {
                 type: 'rawlist',
@@ -438,7 +480,7 @@ async function main() {
                     type: 'input',
                     name: 'domain',
                     message: `Tên miền (Domain) cho phần này:`,
-                    validate: input => input ? true : 'Không được để trống'
+                    validate: validateDomain
                 },
                 {
                     type: 'rawlist',

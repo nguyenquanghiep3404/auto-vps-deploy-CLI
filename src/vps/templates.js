@@ -12,8 +12,9 @@ export function generateNginxConfig(domain, projectType, port, phpSocket) {
         return `
 server {
     server_name ${domain};
+    client_max_body_size 50M;
     location / {
-        proxy_pass http://localhost:${port};
+        proxy_pass http://127.0.0.1:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -28,6 +29,7 @@ server {
         return `
 server {
     server_name ${domain};
+    client_max_body_size 50M;
     root ${rootDir};
     index index.php index.html index.htm;
 
@@ -47,6 +49,7 @@ server {
         return `
 server {
     server_name ${domain};
+    client_max_body_size 50M;
     root /var/www/${domain};
     index index.html index.htm;
 
@@ -59,6 +62,7 @@ server {
         return `
 server {
     server_name ${domain};
+    client_max_body_size 50M;
     root /var/www/${domain};
     index index.html index.htm;
 
