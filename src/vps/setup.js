@@ -52,7 +52,16 @@ export async function setupWebserverOnVPS({ host, username, password, domain, pr
         await ssh.connect({ host, username, password });
 
         console.log('Đang kiểm tra và cài đặt Nginx, Certbot trên VPS (Ubuntu/Debian)...');
-        await ssh.execCommand('sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nginx certbot python3-certbot-nginx');
+        // Chỉ cài những gói còn THIẾU. Trên VPS đang chạy nhiều site, việc `apt-get install`
+        // vô điều kiện có thể nâng cấp nginx đang phục vụ hoặc ghi đè bản certbot hiện có
+        // (vd certbot cài qua snap/pip) bằng bản apt cũ hơn -> hỏng auto-renew. Cài có điều kiện để tránh.
+        await ssh.execCommand(
+            'pkgs=""; ' +
+            'command -v nginx >/dev/null 2>&1 || pkgs="$pkgs nginx"; ' +
+            'command -v certbot >/dev/null 2>&1 || pkgs="$pkgs certbot python3-certbot-nginx"; ' +
+            'if [ -n "$pkgs" ]; then sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $pkgs; ' +
+            'else echo "Nginx & Certbot đã có sẵn, bỏ qua cài đặt."; fi'
+        );
 
         // Với dự án PHP: cài PHP-FPM đúng phiên bản và lấy socket thực tế.
         let phpSocket = null;
@@ -64,6 +73,14 @@ export async function setupWebserverOnVPS({ host, username, password, domain, pr
         const nginxConfig = generateNginxConfig(domain, projectType, port, phpSocket);
 
         const configPath = `/etc/nginx/sites-available/${domain}`;
+        // Nếu đã tồn tại cấu hình cho domain này (vd nhập trùng tên một site đang chạy),
+        // sao lưu lại trước khi ghi đè để không mất cấu hình cũ.
+        const existed = await ssh.execCommand(`[ -f ${configPath} ] && echo yes || echo no`);
+        if ((existed.stdout || '').trim() === 'yes') {
+            const backupPath = `${configPath}.bak.$(date +%Y%m%d-%H%M%S)`;
+            await ssh.execCommand(`sudo cp -a ${configPath} ${backupPath}`);
+            console.log(`   ⚠️  Đã tồn tại cấu hình cho ${domain}. Đã sao lưu bản cũ trước khi ghi đè.`);
+        }
         await ssh.execCommand(`echo '${nginxConfig}' | sudo tee ${configPath}`);
 
         // Enable site
@@ -71,17 +88,39 @@ export async function setupWebserverOnVPS({ host, username, password, domain, pr
 
         // Tạo thư mục web root cho mọi dự án để rsync không bị lỗi quyền
         const rootPath = projectType === 'PHP (Laravel)' ? `/var/www/${domain}/public` : `/var/www/${domain}`;
-        await ssh.execCommand(`sudo mkdir -p ${rootPath} && sudo chown -R $USER:$USER /var/www/${domain}`);
+        // Dùng $(whoami) thay cho $USER vì shell non-interactive qua SSH có thể không set sẵn biến $USER.
+        await ssh.execCommand(`sudo mkdir -p ${rootPath} && sudo chown -R $(whoami):$(whoami) /var/www/${domain}`);
 
-        console.log('Khởi động lại Nginx...');
-        await ssh.execCommand('sudo systemctl restart nginx');
+        console.log('Kiểm tra cấu hình & nạp lại Nginx...');
+        // QUAN TRỌNG: bắt buộc `nginx -t` PASS trước khi nạp lại, và dùng `reload` (graceful)
+        // thay vì `restart`. Nếu cấu hình mới lỗi mà `restart`, toàn bộ các site khác trên VPS sẽ sập.
+        const nginxTest = await ssh.execCommand('sudo nginx -t 2>&1');
+        const testOutput = (nginxTest.stdout || '') + (nginxTest.stderr || '');
+        if (!/test is successful|syntax is ok/.test(testOutput)) {
+            throw new Error('Cấu hình Nginx không hợp lệ, hủy reload để bảo vệ các site đang chạy:\n' + testOutput);
+        }
+        await ssh.execCommand('sudo systemctl reload nginx');
 
         console.log("Đang xin cấp chứng chỉ SSL (Let's Encrypt)...");
         const certbotCmd = `sudo certbot --nginx -d ${domain} --non-interactive --agree-tos -m admin@${domain} --redirect`;
-        const sslResult = await ssh.execCommand(certbotCmd);
+        // Certbot chỉ cho chạy 1 tiến trình tại một thời điểm (vd auto-renew đang chạy).
+        // Thử lại vài lần khi gặp lock thay vì bỏ qua SSL ngay.
+        let sslResult;
+        const maxAttempts = 5;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            sslResult = await ssh.execCommand(certbotCmd);
+            const out = (sslResult.stdout || '') + (sslResult.stderr || '');
+            if (sslResult.code === 0) break;
+            if (/Another instance of Certbot is already running/i.test(out) && attempt < maxAttempts) {
+                console.log(`   ⏳ Certbot đang bận, thử lại sau 10s... (${attempt}/${maxAttempts - 1})`);
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                continue;
+            }
+            break;
+        }
 
         if (sslResult.code !== 0) {
-            console.log('Cảnh báo: Không thể tự động cấp SSL. Có thể Domain chưa trỏ IP về VPS.', sslResult.stderr);
+            console.log('Cảnh báo: Không thể tự động cấp SSL. Có thể Domain chưa trỏ IP về VPS, hoặc Certbot đang bận.', sslResult.stderr);
         } else {
             console.log('Đã cài đặt SSL thành công!');
         }
