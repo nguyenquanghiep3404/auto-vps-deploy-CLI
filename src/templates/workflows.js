@@ -20,6 +20,55 @@ function cleanWorkingDir(workingDir) {
 }
 
 /**
+ * Trả về các câu lệnh tương ứng với từng package manager (npm/pnpm/yarn).
+ */
+function pmCommands(packageManager) {
+    const pm = packageManager || 'npm';
+    if (pm === 'pnpm') {
+        return {
+            pm: 'pnpm',
+            needCorepack: true,
+            ci: 'pnpm install --frozen-lockfile',
+            prod: 'pnpm install --prod --frozen-lockfile',
+            run: (s) => `pnpm run ${s}`,
+            pm2Bin: 'pnpm',
+            pm2Args: (s) => `run ${s}`
+        };
+    }
+    if (pm === 'yarn') {
+        return {
+            pm: 'yarn',
+            needCorepack: true,
+            ci: 'yarn install --frozen-lockfile',
+            prod: 'yarn install --production',
+            run: (s) => `yarn ${s}`,
+            pm2Bin: 'yarn',
+            pm2Args: (s) => `${s}`
+        };
+    }
+    return {
+        pm: 'npm',
+        needCorepack: false,
+        ci: 'npm ci',
+        prod: 'npm ci --production',
+        run: (s) => `npm run ${s}`,
+        pm2Bin: 'npm',
+        pm2Args: (s) => `run ${s}`
+    };
+}
+
+/**
+ * Step bật Corepack trên runner (chỉ cần cho pnpm/yarn để có sẵn đúng binary).
+ */
+function getCorepackStep(cmds) {
+    if (!cmds.needCorepack) return '';
+    return `
+      - name: Enable Corepack (${cmds.pm})
+        run: corepack enable
+`;
+}
+
+/**
  * Sinh step tạo file .env trên runner từ Github Secret.
  * Trả về '' nếu không có secret (không cần nạp .env).
  * target: đường dẫn file .env tương đối với nơi step `run` thực thi.
@@ -35,26 +84,47 @@ function getEnvStep(envSecretName, target = '.env') {
 `;
 }
 
-function getNodeWorkflow(domain, workingDir, usePrisma, port, envSecretName, isWorkspace) {
+/**
+ * Gộp các dòng lệnh chạy trên VPS (qua appleboy/ssh-action) với thụt lề 12 dấu cách.
+ */
+function joinVpsScript(lines) {
+    return lines.filter(Boolean).join('\n            ');
+}
+
+function getNodeWorkflow(opts) {
+    const { domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild } = opts;
+    const cmds = pmCommands(packageManager);
     const cleanDir = cleanWorkingDir(workingDir);
     const pm2Name = `app-${domain}`;
-    const pm2RestartCmd = `PORT=${port} pm2 restart ${pm2Name} || PORT=${port} pm2 start npm --name "${pm2Name}" -- run start`;
+    const startCmd = startScript || 'start';
+    const pm2RestartCmd = `PORT=${port} pm2 restart ${pm2Name} || PORT=${port} pm2 start ${cmds.pm2Bin} --name "${pm2Name}" -- ${cmds.pm2Args(startCmd)}`;
+    const corepackStep = getCorepackStep(cmds);
+    const corepackVps = cmds.needCorepack ? 'corepack enable 2>/dev/null || sudo corepack enable 2>/dev/null || true' : '';
 
-    let prismaCmds = '';
-    if (usePrisma) {
-        prismaCmds = `
-            npx prisma generate
-            npx prisma db push --accept-data-loss`;
-    }
+    const prismaLines = usePrisma ? ['npx prisma generate', 'npx prisma db push --accept-data-loss'] : [];
+    const buildStep = hasBuild
+        ? `
+      - name: Build Project
+        run: ${cmds.run('build')}
+`
+        : '';
 
     if (isWorkspace) {
-        // npm workspaces: lockfile chỉ ở gốc -> npm ci phải chạy ở gốc repo.
-        // Triển khai cả repo lên VPS, app nằm trong thư mục con.
+        // Monorepo workspaces (npm/pnpm/yarn + Turbo): cài & build ở GỐC repo.
+        // Triển khai cả repo lên VPS, app chạy trong thư mục con.
         const envTarget = cleanDir ? `${cleanDir}/.env` : '.env';
         const envStep = getEnvStep(envSecretName, envTarget);
-        const buildCd = cleanDir ? `cd ${cleanDir} && ` : '';
         const vpsRoot = `/var/www/${domain}`;
         const vpsAppDir = cleanDir ? `${vpsRoot}/${cleanDir}` : vpsRoot;
+
+        const vpsScript = joinVpsScript([
+            `cd ${vpsRoot}`,
+            corepackVps,
+            cmds.prod,
+            vpsAppDir !== vpsRoot ? `cd ${vpsAppDir}` : '',
+            ...prismaLines,
+            pm2RestartCmd
+        ]);
 
         return `name: Deploy Node.js App (Monorepo Workspace)
 
@@ -75,13 +145,10 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '26'
-${envStep}
+${corepackStep}${envStep}
       - name: Install Dependencies (workspace root)
-        run: npm ci
-
-      - name: Build Project
-        run: ${buildCd}npm run build --if-present
-
+        run: ${cmds.ci}
+${buildStep}
       - name: Copy files to VPS via rsync
         env:
           SSH_KEY: \${{ secrets.VPS_SSH_KEY }}
@@ -101,16 +168,20 @@ ${envStep}
           username: \${{ secrets.VPS_USERNAME }}
           key: \${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ${vpsRoot}
-            npm ci --production
-            cd ${vpsAppDir}${prismaCmds}
-            ${pm2RestartCmd}
+            ${vpsScript}
 `;
     }
 
-    // Mặc định (không phải workspace): giữ logic cũ + nạp .env.
+    // Mặc định (không phải workspace).
     const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
     const envStep = getEnvStep(envSecretName, '.env');
+    const vpsScript = joinVpsScript([
+        `cd /var/www/${domain}`,
+        corepackVps,
+        cmds.prod,
+        ...prismaLines,
+        pm2RestartCmd
+    ]);
 
     return `name: Deploy Node.js App
 
@@ -131,13 +202,10 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '26'
-${envStep}
+${corepackStep}${envStep}
       - name: Install Dependencies
-        run: npm ci
-
-      - name: Build Project
-        run: npm run build --if-present
-
+        run: ${cmds.ci}
+${buildStep}
       - name: Copy files to VPS via rsync
         env:
           SSH_KEY: \${{ secrets.VPS_SSH_KEY }}
@@ -157,9 +225,7 @@ ${envStep}
           username: \${{ secrets.VPS_USERNAME }}
           key: \${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /var/www/${domain}
-            npm ci --production${prismaCmds}
-            ${pm2RestartCmd}
+            ${vpsScript}
 `;
 }
 
@@ -256,14 +322,16 @@ ${envStep}
 `;
 }
 
-function getSpaWorkflow(domain, workingDir, buildDir, envSecretName, isWorkspace) {
+function getSpaWorkflow(opts) {
+    const { domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager } = opts;
+    const cmds = pmCommands(packageManager);
     const cleanDir = cleanWorkingDir(workingDir);
+    const corepackStep = getCorepackStep(cmds);
 
     if (isWorkspace) {
-        // npm workspaces: npm ci ở gốc, build trong thư mục con, chỉ rsync thư mục build.
+        // Monorepo workspaces: cài & build ở GỐC repo, chỉ rsync thư mục build.
         const envTarget = cleanDir ? `${cleanDir}/.env` : '.env';
         const envStep = getEnvStep(envSecretName, envTarget);
-        const buildCd = cleanDir ? `cd ${cleanDir} && ` : '';
         const distPath = cleanDir ? `${cleanDir}/${buildDir}/` : `${buildDir}/`;
 
         return `name: Deploy SPA (React/Vite/Vue) - Monorepo Workspace
@@ -285,12 +353,12 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '26'
-${envStep}
+${corepackStep}${envStep}
       - name: Install Dependencies (workspace root)
-        run: npm ci
+        run: ${cmds.ci}
 
       - name: Build Project
-        run: ${buildCd}npm run build
+        run: ${cmds.run('build')}
 
       - name: Copy files to VPS via rsync
         env:
@@ -330,12 +398,12 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '26'
-${envStep}
+${corepackStep}${envStep}
       - name: Install Dependencies
-        run: npm ci
+        run: ${cmds.ci}
 
       - name: Build Project
-        run: npm run build
+        run: ${cmds.run('build')}
 
       - name: Copy files to VPS via rsync
         env:
@@ -385,7 +453,7 @@ jobs:
 /**
  * Sinh file .github/workflows/deploy*.yml
  * options: { projectType, domain, role, workingDir, buildDir, usePrisma, port,
- *            envSecretName, isWorkspace, phpVersion }
+ *            envSecretName, isWorkspace, phpVersion, packageManager, startScript, hasBuild }
  */
 export function generateWorkflowFile(options) {
     const {
@@ -398,7 +466,10 @@ export function generateWorkflowFile(options) {
         port,
         envSecretName,
         isWorkspace,
-        phpVersion
+        phpVersion,
+        packageManager,
+        startScript,
+        hasBuild
     } = options;
 
     const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
@@ -409,13 +480,13 @@ export function generateWorkflowFile(options) {
 
     let workflowContent = '';
     if (projectType.includes('Node.js')) {
-        workflowContent = getNodeWorkflow(domain, workingDir, usePrisma, port, envSecretName, isWorkspace);
+        workflowContent = getNodeWorkflow({ domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild });
     } else if (projectType === 'PHP (Laravel)') {
         workflowContent = getLaravelWorkflow(domain, workingDir, envSecretName, phpVersion);
     } else if (projectType === 'PHP (Thuần)') {
         workflowContent = getPurePhpWorkflow(domain, workingDir, envSecretName);
     } else if (projectType === 'React/Vite/Vue (SPA)') {
-        workflowContent = getSpaWorkflow(domain, workingDir, buildDir, envSecretName, isWorkspace);
+        workflowContent = getSpaWorkflow({ domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager });
     } else {
         workflowContent = getStaticWorkflow(domain, workingDir);
     }
