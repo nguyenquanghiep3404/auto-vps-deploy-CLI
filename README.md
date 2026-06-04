@@ -4,6 +4,17 @@
 
 A comprehensive automation tool for VPS configuration, SSL setup, and Github Actions Workflow generation. With special support for complex project structures like **Monorepo**, automatic **Database Migration**, SPA web apps (React, Vite, Vue), and full Git automation!
 
+## New in Version 6 — Database & Environment Variables 🆕
+This release closes the gaps that previously broke apps with a database (e.g. a cafe ordering app with login + DB):
+
+- **Automatic `.env` provisioning**: The tool reads your local `.env`, stores it in a Github Secret, and recreates it during the workflow run — at *build time* (so Vite `VITE_*` / CRA `REACT_APP_*` variables work) and on the *VPS* (so `DATABASE_URL`, secrets and API keys exist). No more "missing `.env`" 500 errors.
+- **Automatic Database server setup**: The tool can install **MySQL / PostgreSQL / MongoDB**, create the database + user, generate a strong password, and inject the connection string into the `.env` secret automatically. `prisma db push` and `artisan migrate` now have a real database to talk to.
+- **Vite / SPA build-time env**: For SPA projects, the `.env` is written **before** `npm run build`, so the bundle points at the correct API endpoint.
+- **npm workspaces (monorepo) support**: If your sub-package has no own `package-lock.json` (lockfile only at the repo root), choose the *workspaces* option — `npm ci` then runs at the root and only the right package is built/deployed.
+- **Laravel fixes**: A valid `APP_KEY` is generated automatically (no more 500 on boot), `php artisan key:generate` runs as a safety net, **PHP-FPM is installed at the version you choose**, and the Nginx `fastcgi_pass` socket is **auto-detected** (the hard-coded `php8.1-fpm.sock` is gone).
+
+> 🔐 The generated database password is shown **once** at the end of the run and saved inside the `.env` Github Secret — copy it somewhere safe.
+
 ## Features in Version 5.1
 - **Smart Auto Port Assignment**: The tool SSHs into your VPS, scans all occupied ports in the 3000-3999 range, and automatically assigns the next available port. You don't even need to know what a "port" is to deploy!
 - **Monorepo Support in a Single Run**: Just select `Monorepo`, enter the number of parts (e.g., 2 for frontend + backend), and the tool will ask for each part's configuration and generate independent workflow files.
@@ -97,6 +108,32 @@ For a Monorepo structure, you need to prepare 2 different domains so the parts d
    - Auto-pushes code to Github.
 
 When you push code to Github, Github Actions will trigger both yml files independently. Code in each directory will be built and deployed to its respective folder, with absolutely no interference between parts!
+
+## Database & Environment Variables Guide (apps with a DB, e.g. a cafe app)
+When you pick `Node.js`, `PHP (Laravel)` or `PHP (Vanilla)`, the tool asks a few extra questions:
+
+1. **PHP version** (for PHP projects): e.g. `8.1`, `8.2`, `8.3`. The tool installs that exact PHP-FPM on the VPS and points Nginx at the detected socket.
+2. **"Does this part need a Database?"** — If yes, choose the engine (`MySQL` / `PostgreSQL` / `MongoDB`) and the DB name + user. The tool will:
+   - Install the database server on the VPS (idempotent).
+   - Create the database and a dedicated user with an auto-generated strong password.
+   - Build the connection string and add it to the `.env` secret:
+     - Node.js → `DATABASE_URL="..."` (ready for Prisma).
+     - Laravel / Vanilla PHP → `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`.
+3. **".env file path"** — Point it at your local `.env` (default `.env`, or `<part-dir>/.env` for monorepo). Its contents are stored as a Github Secret named `ENV_FILE` (single) or `ENV_FILE_<PARTNAME>` (monorepo) and re-created automatically by the workflow. Leave blank to skip.
+
+How the `.env` is used per project type:
+- **Node.js**: written to the app directory before build *and* shipped to the VPS, so both the build and `prisma db push` / runtime have it.
+- **SPA (React/Vite/Vue)**: written **before** `npm run build` so `VITE_*` / `REACT_APP_*` are baked into the bundle.
+- **Laravel / Vanilla PHP**: written before rsync so it lands on the VPS. For Laravel, a valid `APP_KEY` is injected automatically if your file doesn't already have one.
+
+> ⚠️ **MongoDB note**: A local MongoDB has no auth by default. If you use Prisma + MongoDB you must additionally configure a **replica set** (Prisma requires it). MySQL and PostgreSQL work out of the box.
+
+## npm Workspaces (Monorepo) Support
+If your monorepo uses **npm workspaces** — i.e. the only `package-lock.json` lives at the repo root and the sub-packages don't have their own lockfile — answer **Yes** to the workspaces question for that part. The generated workflow then:
+- Runs `npm ci` at the **repo root** (so `npm ci` no longer fails inside the sub-folder).
+- Builds only the relevant package (`cd <part-dir> && npm run build`).
+- For SPA: deploys just the built `dist`/`build` folder.
+- For Node.js: deploys the whole repo and runs `npm ci --production` at the root on the VPS, then starts the app from its sub-folder (so hoisted `node_modules` are available).
 
 ## How the Auto Port System Works
 

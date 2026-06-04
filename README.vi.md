@@ -4,6 +4,17 @@
 
 Công cụ tự động hóa toàn diện quá trình cấu hình VPS, thiết lập SSL, và tạo Github Actions Workflow. Đặc biệt hỗ trợ tối đa cho các cấu trúc dự án phức tạp như **Monorepo**, **Database Migration** tự động, các web SPA (React, Vite, Vue) và tự động hóa cả Git!
 
+## Mới Trong Version 6 — Database & Biến Môi Trường 🆕
+Phiên bản này vá những "lỗ hổng" trước đây làm hỏng các app có database (ví dụ app quán cafe có đặt món + đăng nhập + DB):
+
+- **Tự động nạp `.env`**: Tool đọc file `.env` local của bạn, lưu vào Github Secret và tạo lại nó trong lúc chạy workflow — cả lúc *build* (để biến Vite `VITE_*` / CRA `REACT_APP_*` hoạt động) lẫn trên *VPS* (để có `DATABASE_URL`, secret, khoá API). Không còn lỗi 500 vì thiếu `.env`.
+- **Tự động cài Database server**: Tool có thể cài **MySQL / PostgreSQL / MongoDB**, tạo database + user, sinh mật khẩu mạnh và tự chèn chuỗi kết nối vào secret `.env`. Nhờ đó `prisma db push` và `artisan migrate` đã có database thật để làm việc.
+- **Biến build-time của Vite / SPA**: Với dự án SPA, file `.env` được ghi **trước** `npm run build`, nên bản build trỏ đúng endpoint API.
+- **Hỗ trợ npm workspaces (Monorepo)**: Nếu package con không có `package-lock.json` riêng (lockfile chỉ ở thư mục gốc), hãy chọn chế độ *workspaces* — khi đó `npm ci` sẽ chạy ở thư mục gốc và chỉ build/deploy đúng package cần thiết.
+- **Sửa các lỗi Laravel**: Tự sinh `APP_KEY` hợp lệ (hết lỗi 500 khi khởi động), chạy thêm `php artisan key:generate` để chắc chắn, **cài PHP-FPM đúng phiên bản bạn chọn**, và **tự dò socket** cho `fastcgi_pass` của Nginx (đã bỏ việc hard-code `php8.1-fpm.sock`).
+
+> 🔐 Mật khẩu database được sinh ra sẽ hiển thị **một lần duy nhất** ở cuối quá trình và được lưu trong Github Secret `.env` — hãy chép lại nơi an toàn.
+
 ## Các Tính Năng Trong Version 5.1
 - **Tự động gán Port thông minh**: Tool SSH vào VPS, quét toàn bộ cổng đang bị chiếm trong dãy 3000-3999, rồi tự gán cổng trống tiếp theo cho dự án. Người dùng không cần biết "Port là gì" cũng triển khai được!
 - **Hỗ trợ Monorepo trong 1 lần chạy duy nhất**: Chỉ cần chọn `Monorepo`, nhập số phần (VD: 2 cho frontend + backend), tool sẽ tự hỏi cấu hình riêng cho từng phần và sinh ra các file workflow độc lập.
@@ -97,6 +108,32 @@ Với cấu trúc Monorepo, bạn cần chuẩn bị 2 tên miền khác nhau đ
    - Tự động Push code lên Github.
 
 Khi bạn push code lên Github, Github Actions sẽ kích hoạt cả 2 file yml này độc lập. Mã nguồn ở thư mục nào sẽ được build và cập nhật cho thư mục đó, hoàn toàn không bị ảnh hưởng lẫn nhau!
+
+## Hướng Dẫn Database & Biến Môi Trường (app có DB, ví dụ app quán cafe)
+Khi bạn chọn `Node.js`, `PHP (Laravel)` hoặc `PHP (Thuần)`, tool sẽ hỏi thêm vài câu:
+
+1. **Phiên bản PHP** (với dự án PHP): ví dụ `8.1`, `8.2`, `8.3`. Tool cài đúng PHP-FPM phiên bản đó trên VPS và trỏ Nginx vào socket đã dò được.
+2. **"Phần này có cần Database không?"** — Nếu có, chọn loại (`MySQL` / `PostgreSQL` / `MongoDB`) và tên DB + user. Tool sẽ:
+   - Cài database server trên VPS (chạy lại nhiều lần không sao).
+   - Tạo database và một user riêng với mật khẩu mạnh sinh tự động.
+   - Tạo chuỗi kết nối và thêm vào secret `.env`:
+     - Node.js → `DATABASE_URL="..."` (sẵn sàng cho Prisma).
+     - Laravel / PHP thuần → `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`.
+3. **"Đường dẫn file .env"** — Trỏ tới file `.env` local của bạn (mặc định `.env`, hoặc `<thư-mục-phần>/.env` với monorepo). Nội dung được lưu thành Github Secret tên `ENV_FILE` (single) hoặc `ENV_FILE_<TÊNPHẦN>` (monorepo) và được workflow tạo lại tự động. Để trống nếu không có.
+
+Cách `.env` được dùng theo từng loại dự án:
+- **Node.js**: ghi vào thư mục app trước khi build *và* đẩy lên VPS, nên cả lúc build lẫn `prisma db push` / runtime đều có.
+- **SPA (React/Vite/Vue)**: ghi **trước** `npm run build` để các biến `VITE_*` / `REACT_APP_*` được "nung" vào bản build.
+- **Laravel / PHP thuần**: ghi trước khi rsync để file `.env` lên được VPS. Riêng Laravel, `APP_KEY` hợp lệ sẽ được tự chèn nếu file của bạn chưa có.
+
+> ⚠️ **Lưu ý MongoDB**: MongoDB cài local mặc định không bật xác thực. Nếu dùng Prisma + MongoDB, bạn phải cấu hình thêm **Replica Set** (Prisma bắt buộc). MySQL và PostgreSQL thì chạy được ngay.
+
+## Hỗ Trợ npm Workspaces (Monorepo)
+Nếu monorepo của bạn dùng **npm workspaces** — tức là chỉ có một `package-lock.json` ở thư mục gốc và các package con không có lockfile riêng — hãy trả lời **Có** ở câu hỏi workspaces cho phần đó. File workflow sinh ra sẽ:
+- Chạy `npm ci` ở **thư mục gốc** của repo (nên `npm ci` không còn lỗi khi chạy trong thư mục con nữa).
+- Chỉ build đúng package cần thiết (`cd <thư-mục-phần> && npm run build`).
+- Với SPA: chỉ deploy thư mục build (`dist`/`build`).
+- Với Node.js: deploy cả repo và chạy `npm ci --production` ở thư mục gốc trên VPS, rồi khởi động app từ thư mục con (để dùng được `node_modules` đã hoist lên gốc).
 
 ## Cách Hệ Thống Port Tự Động Hoạt Động
 
