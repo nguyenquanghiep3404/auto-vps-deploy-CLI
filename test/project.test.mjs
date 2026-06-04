@@ -1,0 +1,95 @@
+import { test, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { detectPackageManager, detectWorkspace, hasBuildScript } from '../src/utils/project.js';
+
+let root;
+let sub;
+
+beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'projtest-'));
+    sub = path.join(root, 'apps', 'web');
+    fs.mkdirSync(sub, { recursive: true });
+});
+
+afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+});
+
+function touch(dir, name, content = '') {
+    fs.writeFileSync(path.join(dir, name), content);
+}
+
+test('detectPackageManager: lockfile trong thư mục con được ưu tiên', () => {
+    touch(sub, 'pnpm-lock.yaml');
+    touch(root, 'package-lock.json');
+    const det = detectPackageManager(sub, root);
+    assert.equal(det.pm, 'pnpm');
+    assert.equal(det.atRoot, false);
+});
+
+test('detectPackageManager: từng loại lockfile', () => {
+    touch(sub, 'package-lock.json');
+    assert.equal(detectPackageManager(sub, root).pm, 'npm');
+
+    fs.rmSync(path.join(sub, 'package-lock.json'));
+    touch(sub, 'yarn.lock');
+    assert.equal(detectPackageManager(sub, root).pm, 'yarn');
+});
+
+test('detectPackageManager: rơi xuống thư mục gốc khi con không có lockfile', () => {
+    touch(root, 'pnpm-lock.yaml');
+    const det = detectPackageManager(sub, root);
+    assert.equal(det.pm, 'pnpm');
+    assert.equal(det.atRoot, true);
+});
+
+test('detectPackageManager: mặc định npm khi không có gì', () => {
+    const det = detectPackageManager(sub, root);
+    assert.equal(det.pm, 'npm');
+});
+
+test('detectWorkspace: true khi lockfile chỉ ở gốc', () => {
+    touch(root, 'pnpm-lock.yaml');
+    assert.equal(detectWorkspace(sub, root), true);
+});
+
+test('detectWorkspace: false khi con có lockfile riêng', () => {
+    touch(sub, 'package-lock.json');
+    touch(root, 'package-lock.json');
+    assert.equal(detectWorkspace(sub, root), false);
+});
+
+test('detectWorkspace: nhận diện pnpm-workspace.yaml / turbo.json / package.json workspaces', () => {
+    touch(root, 'pnpm-workspace.yaml');
+    assert.equal(detectWorkspace(sub, root), true);
+
+    fs.rmSync(path.join(root, 'pnpm-workspace.yaml'));
+    touch(root, 'turbo.json', '{}');
+    assert.equal(detectWorkspace(sub, root), true);
+
+    fs.rmSync(path.join(root, 'turbo.json'));
+    touch(root, 'package.json', JSON.stringify({ workspaces: ['apps/*'] }));
+    assert.equal(detectWorkspace(sub, root), true);
+});
+
+test('detectWorkspace: false khi workingDir trùng gốc, hoặc gốc trống', () => {
+    assert.equal(detectWorkspace(root, root), false);
+    assert.equal(detectWorkspace(sub, root), false);
+});
+
+test('hasBuildScript: true chỉ khi có scripts.build', () => {
+    touch(sub, 'package.json', JSON.stringify({ scripts: { build: 'vite build' } }));
+    assert.equal(hasBuildScript(sub), true);
+
+    fs.writeFileSync(path.join(sub, 'package.json'), JSON.stringify({ scripts: { start: 'node x' } }));
+    assert.equal(hasBuildScript(sub), false);
+
+    fs.writeFileSync(path.join(sub, 'package.json'), '{ invalid json');
+    assert.equal(hasBuildScript(sub), false);
+
+    assert.equal(hasBuildScript(path.join(root, 'nope')), false);
+});

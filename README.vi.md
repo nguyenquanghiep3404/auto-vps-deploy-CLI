@@ -10,7 +10,10 @@ Phiên bản này vá những "lỗ hổng" trước đây làm hỏng các app 
 - **Tự động nạp `.env`**: Tool đọc file `.env` local của bạn, lưu vào Github Secret và tạo lại nó trong lúc chạy workflow — cả lúc *build* (để biến Vite `VITE_*` / CRA `REACT_APP_*` hoạt động) lẫn trên *VPS* (để có `DATABASE_URL`, secret, khoá API). Không còn lỗi 500 vì thiếu `.env`.
 - **Tự động cài Database server**: Tool có thể cài **MySQL / PostgreSQL / MongoDB**, tạo database + user, sinh mật khẩu mạnh và tự chèn chuỗi kết nối vào secret `.env`. Nhờ đó `prisma db push` và `artisan migrate` đã có database thật để làm việc.
 - **Biến build-time của Vite / SPA**: Với dự án SPA, file `.env` được ghi **trước** `npm run build`, nên bản build trỏ đúng endpoint API.
-- **Hỗ trợ npm workspaces (Monorepo)**: Nếu package con không có `package-lock.json` riêng (lockfile chỉ ở thư mục gốc), hãy chọn chế độ *workspaces* — khi đó `npm ci` sẽ chạy ở thư mục gốc và chỉ build/deploy đúng package cần thiết.
+- **Hỗ trợ mọi package manager — npm / pnpm / yarn (tự nhận diện)**: Tool tự đoán theo lockfile (`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`) và cho bạn xác nhận hoặc đổi. Sau đó sinh đúng lệnh install/build/runtime và bật **Corepack** cho pnpm/yarn. Monorepo dùng **Turbo** cũng chạy được (build ở thư mục gốc repo).
+- **Hỗ trợ workspaces (Monorepo)**: Nếu package con không có lockfile riêng (lockfile chỉ ở thư mục gốc), hãy chọn chế độ *workspaces* — khi đó install + build chạy ở gốc và chỉ deploy đúng package cần thiết.
+- **Tùy chọn start script**: Với app Node, bạn chọn được script chạy production (mặc định `start`, ví dụ `start:prod` cho NestJS) — không còn mặc định cứng `npm start`.
+- **Tự cài Node.js + PM2 + Corepack trên VPS**: Với dự án Node, tool giờ **tự nhận diện và cài** Node.js (≥20 LTS), PM2 và (cho pnpm/yarn) Corepack trên VPS. **Idempotent** — đã có thì bỏ qua, không phải chọn tay.
 - **Sửa các lỗi Laravel**: Tự sinh `APP_KEY` hợp lệ (hết lỗi 500 khi khởi động), chạy thêm `php artisan key:generate` để chắc chắn, **cài PHP-FPM đúng phiên bản bạn chọn**, và **tự dò socket** cho `fastcgi_pass` của Nginx (đã bỏ việc hard-code `php8.1-fpm.sock`).
 
 > 🔐 Mật khẩu database được sinh ra sẽ hiển thị **một lần duy nhất** ở cuối quá trình và được lưu trong Github Secret `.env` — hãy chép lại nơi an toàn.
@@ -128,12 +131,46 @@ Cách `.env` được dùng theo từng loại dự án:
 
 > ⚠️ **Lưu ý MongoDB**: MongoDB cài local mặc định không bật xác thực. Nếu dùng Prisma + MongoDB, bạn phải cấu hình thêm **Replica Set** (Prisma bắt buộc). MySQL và PostgreSQL thì chạy được ngay.
 
-## Hỗ Trợ npm Workspaces (Monorepo)
-Nếu monorepo của bạn dùng **npm workspaces** — tức là chỉ có một `package-lock.json` ở thư mục gốc và các package con không có lockfile riêng — hãy trả lời **Có** ở câu hỏi workspaces cho phần đó. File workflow sinh ra sẽ:
-- Chạy `npm ci` ở **thư mục gốc** của repo (nên `npm ci` không còn lỗi khi chạy trong thư mục con nữa).
-- Chỉ build đúng package cần thiết (`cd <thư-mục-phần> && npm run build`).
-- Với SPA: chỉ deploy thư mục build (`dist`/`build`).
-- Với Node.js: deploy cả repo và chạy `npm ci --production` ở thư mục gốc trên VPS, rồi khởi động app từ thư mục con (để dùng được `node_modules` đã hoist lên gốc).
+## Prisma cho Production — `migrate deploy` + `db seed` (chỉnh tay)
+Mặc định, workflow Node do tool sinh ra dùng **`prisma db push --accept-data-loss`**. Lệnh này ép DB giống schema, **không có lịch sử migration** và **có thể xoá dữ liệu** khi thay đổi schema cần bỏ cột/bảng. Rất hợp để làm thử, nhưng **nguy hiểm với app thật đang có dữ liệu** (đơn hàng, khách hàng...), và **không chạy seed**.
+
+Khi lên production, hãy **tự sửa tay** trong file `deploy*.yml` thành migration + seed:
+
+```yaml
+# Thay khối này:
+            npx prisma generate
+            npx prisma db push --accept-data-loss
+
+# Bằng khối này:
+            npx prisma generate
+            npx prisma migrate deploy
+            # Chỉ ở LẦN DEPLOY ĐẦU (tạo role/admin/dữ liệu nền):
+            # npx prisma db seed
+```
+
+Vì sao:
+- **`prisma migrate deploy`** áp các file migration đã commit (`prisma/migrations/`) theo đúng thứ tự, ghi lại trong bảng `_prisma_migrations` — an toàn, lặp lại được, kiểm soát được, **không mất dữ liệu bất ngờ**. (Đúng cho dự án đã đi theo migration, vd có script `db:migrate`.)
+- **`prisma db seed`** nạp dữ liệu khởi tạo (admin mặc định, các role RBAC, dữ liệu nền). Chỉ chạy ở **lần deploy đầu tiên** (hoặc viết seed kiểu idempotent), nếu không dữ liệu sẽ bị nhân đôi.
+- **Điều kiện:** phải commit thư mục `prisma/migrations/` (sinh ở máy dev bằng `prisma migrate dev`). `migrate deploy` cần các file này; `db push` thì không.
+
+## Hỗ Trợ Package Manager & Workspaces (Monorepo)
+Tool tự nhận diện package manager theo lockfile và cho bạn xác nhận/đổi:
+
+| Lockfile | Package manager |
+|---|---|
+| `package-lock.json` | npm |
+| `pnpm-lock.yaml` | pnpm (bật Corepack) |
+| `yarn.lock` | yarn (bật Corepack) |
+
+Nếu monorepo của bạn dùng **workspaces** (npm/pnpm/yarn) hoặc **Turbo** — tức là chỉ có một lockfile ở thư mục gốc và các package con không có lockfile riêng — hãy trả lời **Có** ở câu hỏi workspaces cho phần đó. File workflow sinh ra sẽ:
+- Cài dependency ở **thư mục gốc** repo bằng đúng package manager (`npm ci` / `pnpm install --frozen-lockfile` / `yarn install --frozen-lockfile`), nên không còn lỗi cài trong thư mục con.
+- Build ở **thư mục gốc** (`<pm> run build`), để Turbo / script build ở root biên dịch các package dùng chung đúng thứ tự.
+- Với SPA: chỉ deploy thư mục build (`dist`/`build`) của package con.
+- Với Node.js: deploy cả repo, chạy lệnh cài production ở gốc trên VPS (`npm ci --production` / `pnpm install --prod` / `yarn install --production`), rồi khởi động app từ thư mục con bằng start script bạn chọn.
+
+**Ví dụ:**
+- Monorepo **npm workspaces** (Next.js + NestJS + package dùng chung): 2 phần, đều là `Node.js`, đều *workspaces = Có*; phần NestJS chọn start script `start:prod` và dùng Prisma + PostgreSQL. → Chính là cấu trúc của **Tiny-cafe**.
+- Monorepo **pnpm + Turbo**: làm y hệt — chỉ cần chọn `pnpm` khi được hỏi (tool tự đoán từ `pnpm-lock.yaml`). → Chính là cấu trúc của **dp-tamdan**.
 
 ## Cách Hệ Thống Port Tự Động Hoạt Động
 

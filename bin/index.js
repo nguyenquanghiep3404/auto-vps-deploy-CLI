@@ -4,7 +4,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { generateSSHKeys, installPublicKeyToVPS, scanUsedPorts, findAvailablePorts } from '../src/utils/ssh.js';
 import { checkGithubAuth, loginGithub, setGithubSecret, installGithubCli } from '../src/github/secrets.js';
-import { setupWebserverOnVPS, setupDatabaseOnVPS } from '../src/vps/setup.js';
+import { setupWebserverOnVPS, setupDatabaseOnVPS, ensureNodeRuntimeOnVPS } from '../src/vps/setup.js';
 import { generateWorkflowFile } from '../src/templates/workflows.js';
 import {
     readEnvFile,
@@ -17,7 +17,9 @@ import {
     envHasKey,
     mergeEnvContent
 } from '../src/utils/env.js';
+import { detectPackageManager, detectWorkspace, hasBuildScript } from '../src/utils/project.js';
 import { execaCommand } from 'execa';
+import path from 'path';
 
 /**
  * Hỏi thêm các cấu hình nâng cao cho một "phần" của dự án:
@@ -26,13 +28,16 @@ import { execaCommand } from 'execa';
  * - Database (với Node/Laravel/PHP thuần)
  * - File .env local cần nạp (với mọi loại trừ Static)
  */
-async function collectExtras({ projectType, defaultEnvPath, isMonorepo, partName }) {
+async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonorepo, partName }) {
     const extras = {
         phpVersion: null,
         database: null,
         envFilePath: null,
         envFileContent: null,
-        isWorkspace: false
+        isWorkspace: false,
+        packageManager: 'npm',
+        startScript: 'start',
+        hasBuild: false
     };
 
     const isNode = projectType.includes('Node.js');
@@ -41,6 +46,12 @@ async function collectExtras({ projectType, defaultEnvPath, isMonorepo, partName
     const isPhp = projectType.includes('PHP');
     const isSpa = projectType === 'React/Vite/Vue (SPA)';
     const isStatic = projectType === 'Static (HTML thuần)';
+    const isJs = isNode || isSpa;
+
+    // Đường dẫn tuyệt đối để dò lockfile / package.json
+    const repoRoot = process.cwd();
+    const cleanDir = (workingDir || './').replace(/^\.\//, '').replace(/\/+$/, '');
+    const workDirAbs = cleanDir ? path.join(repoRoot, cleanDir) : repoRoot;
 
     // ---- Phiên bản PHP ----
     if (isPhp) {
@@ -54,15 +65,46 @@ async function collectExtras({ projectType, defaultEnvPath, isMonorepo, partName
         extras.phpVersion = phpVersion.trim();
     }
 
-    // ---- npm workspaces (chỉ với Monorepo Node/SPA) ----
-    if (isMonorepo && (isNode || isSpa)) {
+    // ---- Package manager (tự nhận diện theo lockfile, cho phép sửa) ----
+    if (isJs) {
+        const detected = detectPackageManager(workDirAbs, repoRoot);
+        const { packageManager } = await inquirer.prompt([{
+            type: 'list',
+            name: 'packageManager',
+            message: `Package manager (tự phát hiện: ${detected.pm}):`,
+            choices: ['npm', 'pnpm', 'yarn'],
+            default: detected.pm
+        }]);
+        extras.packageManager = packageManager;
+    }
+
+    // ---- Workspaces (chỉ với Monorepo Node/SPA) — mặc định lấy từ kết quả tự dò ----
+    if (isMonorepo && isJs) {
+        const wsDefault = detectWorkspace(workDirAbs, repoRoot);
         const { isWorkspace } = await inquirer.prompt([{
             type: 'confirm',
             name: 'isWorkspace',
-            message: 'Dự án này dùng npm workspaces? (package-lock.json chỉ nằm ở thư mục gốc repo, package con không có lockfile riêng)',
-            default: false
+            message: 'Dự án này dùng workspaces (npm/pnpm/yarn/Turbo)? (lockfile chỉ ở thư mục gốc repo, package con không có lockfile riêng)',
+            default: wsDefault
         }]);
         extras.isWorkspace = isWorkspace;
+    }
+
+    // ---- Start script cho app Node.js (mặc định 'start', NestJS thường là 'start:prod') ----
+    if (isNode) {
+        const { startScript } = await inquirer.prompt([{
+            type: 'input',
+            name: 'startScript',
+            message: 'Script chạy production của app (vd: start, start:prod):',
+            default: 'start'
+        }]);
+        extras.startScript = (startScript || '').trim() || 'start';
+    }
+
+    // ---- Có script build hay không (build ở gốc nếu là workspace) ----
+    if (isJs) {
+        const buildCheckDir = extras.isWorkspace ? repoRoot : workDirAbs;
+        extras.hasBuild = hasBuildScript(buildCheckDir);
     }
 
     // ---- Database (Node / Laravel / PHP thuần) ----
@@ -323,9 +365,10 @@ async function main() {
             console.log(chalk.green(`✅ Đã tự động gán cổng: ${port}`));
         }
 
-        // Các cấu hình nâng cao: .env, database, php version
+        // Các cấu hình nâng cao: .env, database, php version, package manager...
         const extras = await collectExtras({
             projectType: singleAnswers.projectType,
+            workingDir: './',
             defaultEnvPath: '.env',
             isMonorepo: false,
             partName: 'app'
@@ -342,7 +385,10 @@ async function main() {
             phpVersion: extras.phpVersion,
             database: extras.database,
             envFileContent: extras.envFileContent,
-            isWorkspace: extras.isWorkspace
+            isWorkspace: extras.isWorkspace,
+            packageManager: extras.packageManager,
+            startScript: extras.startScript,
+            hasBuild: extras.hasBuild
         });
 
     } else {
@@ -428,6 +474,7 @@ async function main() {
 
             const extras = await collectExtras({
                 projectType: partAnswers.projectType,
+                workingDir: partAnswers.workingDir,
                 defaultEnvPath,
                 isMonorepo: true,
                 partName: partAnswers.partName
@@ -444,7 +491,10 @@ async function main() {
                 phpVersion: extras.phpVersion,
                 database: extras.database,
                 envFileContent: extras.envFileContent,
-                isWorkspace: extras.isWorkspace
+                isWorkspace: extras.isWorkspace,
+                packageManager: extras.packageManager,
+                startScript: extras.startScript,
+                hasBuild: extras.hasBuild
             });
         }
 
@@ -455,7 +505,9 @@ async function main() {
             const portInfo = p.port ? ` | Cổng: ${p.port}` : '';
             const dbInfo = p.database ? ` | DB: ${p.database.engine}` : '';
             const wsInfo = p.isWorkspace ? ' | workspaces' : '';
-            console.log(chalk.white(`  ${idx + 1}. ${chalk.bold(p.name)}: ${p.domain} | ${p.projectType}${portInfo}${dbInfo}${wsInfo} | Thư mục: ${p.workingDir}`));
+            const isJs = p.projectType.includes('Node.js') || p.projectType === 'React/Vite/Vue (SPA)';
+            const pmInfo = isJs ? ` | ${p.packageManager}` : '';
+            console.log(chalk.white(`  ${idx + 1}. ${chalk.bold(p.name)}: ${p.domain} | ${p.projectType}${pmInfo}${portInfo}${dbInfo}${wsInfo} | Thư mục: ${p.workingDir}`));
         });
         console.log(chalk.gray('─'.repeat(60)));
     }
@@ -494,6 +546,15 @@ async function main() {
                 part.dbPassword = dbPassword;
             }
             console.log(chalk.green('✅ Xong Bước 1.5.'));
+        }
+
+        // ---- Bước 1.6: Đảm bảo Node.js + PM2 (+ Corepack) cho app Node ----
+        const nodeParts = parts.filter(p => p.projectType.includes('Node.js'));
+        if (nodeParts.length > 0) {
+            console.log(chalk.blue('\n▶️  Bước 1.6: Cài đặt Node.js + PM2 (+ Corepack) cho ứng dụng Node...'));
+            const needCorepack = nodeParts.some(p => p.packageManager === 'pnpm' || p.packageManager === 'yarn');
+            await ensureNodeRuntimeOnVPS(vpsHost, vpsUser, vpsPassword, { needCorepack });
+            console.log(chalk.green('✅ Xong Bước 1.6.'));
         }
 
         // ---- Bước 2: Sinh SSH Key (1 lần duy nhất) ----
@@ -554,7 +615,10 @@ async function main() {
                 port: part.port,
                 envSecretName: part.envSecretName,
                 isWorkspace: part.isWorkspace,
-                phpVersion: part.phpVersion
+                phpVersion: part.phpVersion,
+                packageManager: part.packageManager,
+                startScript: part.startScript,
+                hasBuild: part.hasBuild
             });
         }
         console.log(chalk.green('✅ Xong Bước 4.'));

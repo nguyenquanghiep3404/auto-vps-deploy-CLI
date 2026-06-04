@@ -1,71 +1,5 @@
 import { NodeSSH } from 'node-ssh';
-
-/**
- * Tạo cấu hình Nginx dựa trên loại dự án.
- * phpSocket: đường dẫn socket PHP-FPM thực tế trên VPS (đã được dò tự động).
- */
-function generateNginxConfig(domain, projectType, port, phpSocket) {
-    if (projectType.includes('Node.js')) {
-        return `
-server {
-    server_name ${domain};
-    location / {
-        proxy_pass http://localhost:${port};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-`;
-    } else if (projectType.includes('PHP')) {
-        const rootDir = projectType === 'PHP (Laravel)' ? `/var/www/${domain}/public` : `/var/www/${domain}`;
-        const socket = phpSocket || '/run/php/php8.3-fpm.sock';
-        return `
-server {
-    server_name ${domain};
-    root ${rootDir};
-    index index.php index.html index.htm;
-
-    location / {
-        try_files $uri $uri/ /index.php?$query_string;
-    }
-
-    location ~ \\.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:${socket};
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
-    }
-}
-`;
-    } else if (projectType === 'React/Vite/Vue (SPA)') {
-        return `
-server {
-    server_name ${domain};
-    root /var/www/${domain};
-    index index.html index.htm;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-`;
-    } else { // Static
-        return `
-server {
-    server_name ${domain};
-    root /var/www/${domain};
-    index index.html index.htm;
-
-    location / {
-        try_files $uri $uri/ =404;
-    }
-}
-`;
-    }
-}
+import { generateNginxConfig } from './templates.js';
 
 /**
  * Cài đặt PHP-FPM (đúng phiên bản yêu cầu) và các extension thường dùng trên VPS.
@@ -155,6 +89,60 @@ export async function setupWebserverOnVPS({ host, username, password, domain, pr
         return true;
     } catch (error) {
         throw new Error('Lỗi trong quá trình cài đặt Web Server trên VPS: ' + error.message);
+    } finally {
+        ssh.dispose();
+    }
+}
+
+/**
+ * Đảm bảo VPS có Node.js (>=20), PM2 và (tuỳ chọn) Corepack cho app Node.
+ * Idempotent: đã có thì bỏ qua, chỉ cài phần còn thiếu.
+ * options: { needCorepack: boolean } — bật Corepack khi dùng pnpm/yarn.
+ */
+export async function ensureNodeRuntimeOnVPS(host, username, password, options = {}) {
+    const { needCorepack = false } = options;
+    const ssh = new NodeSSH();
+    try {
+        await ssh.connect({ host, username, password });
+        console.log(`   → Kiểm tra & cài đặt Node.js (>=20), PM2${needCorepack ? ', Corepack' : ''} (bỏ qua nếu đã có)...`);
+
+        const corepackBlock = needCorepack
+            ? 'sudo corepack enable >/dev/null 2>&1 || corepack enable >/dev/null 2>&1 || true\n'
+            : '';
+
+        // Lưu ý: chỉ dùng $VAR và $(...) trong bash; tránh ${...} để khỏi đụng template literal của JS.
+        const script = `
+set -e
+command -v curl >/dev/null 2>&1 || (sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl)
+NEED_NODE=1
+if command -v node >/dev/null 2>&1; then
+  CURMAJ=$(node -v | sed 's/[^0-9.]*//g' | cut -d. -f1)
+  if [ -n "$CURMAJ" ] && [ "$CURMAJ" -ge 20 ]; then NEED_NODE=0; fi
+fi
+if [ "$NEED_NODE" -eq 1 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+fi
+command -v pm2 >/dev/null 2>&1 || sudo npm install -g pm2
+${corepackBlock}sudo env PATH=$PATH pm2 startup >/dev/null 2>&1 || true
+`;
+        const res = await ssh.execCommand(script);
+        if (res.code !== 0) {
+            console.log('   ⚠️  Có thể chưa cài đủ Node/PM2. Chi tiết:', res.stderr);
+        }
+
+        // Xác minh bằng shell KHÔNG tương tác (đúng kiểu mà bước deploy sẽ chạy).
+        const verify = await ssh.execCommand(`node -v; npm -v; pm2 -v${needCorepack ? '; corepack --version' : ''}`);
+        if (verify.code === 0) {
+            console.log('   ✅ Node/PM2 sẵn sàng: ' + (verify.stdout || '').trim().replace(/\n/g, ' | '));
+        } else {
+            console.log('   ⚠️  Không xác minh được Node/PM2 qua SSH (có thể do PATH). Chi tiết:', verify.stderr);
+        }
+        return true;
+    } catch (error) {
+        // Không chặn toàn bộ quy trình — chỉ cảnh báo để người dùng tự xử lý.
+        console.log('   ⚠️  Lỗi khi cài đặt Node/PM2 trên VPS: ' + error.message);
+        return false;
     } finally {
         ssh.dispose();
     }

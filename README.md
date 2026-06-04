@@ -10,7 +10,10 @@ This release closes the gaps that previously broke apps with a database (e.g. a 
 - **Automatic `.env` provisioning**: The tool reads your local `.env`, stores it in a Github Secret, and recreates it during the workflow run — at *build time* (so Vite `VITE_*` / CRA `REACT_APP_*` variables work) and on the *VPS* (so `DATABASE_URL`, secrets and API keys exist). No more "missing `.env`" 500 errors.
 - **Automatic Database server setup**: The tool can install **MySQL / PostgreSQL / MongoDB**, create the database + user, generate a strong password, and inject the connection string into the `.env` secret automatically. `prisma db push` and `artisan migrate` now have a real database to talk to.
 - **Vite / SPA build-time env**: For SPA projects, the `.env` is written **before** `npm run build`, so the bundle points at the correct API endpoint.
-- **npm workspaces (monorepo) support**: If your sub-package has no own `package-lock.json` (lockfile only at the repo root), choose the *workspaces* option — `npm ci` then runs at the root and only the right package is built/deployed.
+- **Any package manager — npm / pnpm / yarn (auto-detected)**: The tool detects the package manager from the lockfile (`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`) and lets you confirm or override it. It then generates the correct install/build/runtime commands and enables **Corepack** for pnpm/yarn. **Turbo** monorepos work too (build runs at the repo root).
+- **Workspaces (monorepo) support**: If your sub-package has no own lockfile (lockfile only at the repo root), pick the *workspaces* option — install + build then run at the root and only the right package is deployed.
+- **Custom start script**: For Node apps you can choose the production start script (default `start`, e.g. `start:prod` for NestJS) — no more assuming `npm start`.
+- **Auto Node.js + PM2 + Corepack on the VPS**: For Node projects the tool now **auto-detects and installs** Node.js (≥20 LTS), PM2 and (for pnpm/yarn) Corepack on the VPS. It's **idempotent** — already installed is skipped, nothing is chosen by hand.
 - **Laravel fixes**: A valid `APP_KEY` is generated automatically (no more 500 on boot), `php artisan key:generate` runs as a safety net, **PHP-FPM is installed at the version you choose**, and the Nginx `fastcgi_pass` socket is **auto-detected** (the hard-coded `php8.1-fpm.sock` is gone).
 
 > 🔐 The generated database password is shown **once** at the end of the run and saved inside the `.env` Github Secret — copy it somewhere safe.
@@ -128,12 +131,46 @@ How the `.env` is used per project type:
 
 > ⚠️ **MongoDB note**: A local MongoDB has no auth by default. If you use Prisma + MongoDB you must additionally configure a **replica set** (Prisma requires it). MySQL and PostgreSQL work out of the box.
 
-## npm Workspaces (Monorepo) Support
-If your monorepo uses **npm workspaces** — i.e. the only `package-lock.json` lives at the repo root and the sub-packages don't have their own lockfile — answer **Yes** to the workspaces question for that part. The generated workflow then:
-- Runs `npm ci` at the **repo root** (so `npm ci` no longer fails inside the sub-folder).
-- Builds only the relevant package (`cd <part-dir> && npm run build`).
-- For SPA: deploys just the built `dist`/`build` folder.
-- For Node.js: deploys the whole repo and runs `npm ci --production` at the root on the VPS, then starts the app from its sub-folder (so hoisted `node_modules` are available).
+## Prisma in Production — `migrate deploy` + `db seed` (manual tweak)
+By default, the generated Node workflow uses **`prisma db push --accept-data-loss`**. This force-syncs the database to your schema with **no migration history** and **can delete data** when a schema change requires dropping a column/table. It's great for prototyping, but **risky for a live app with real data** (orders, customers...), and it does **not** run seeds.
+
+For a real production app you should switch to migrations + seeding **by hand** in the generated `deploy*.yml`:
+
+```yaml
+# Replace this:
+            npx prisma generate
+            npx prisma db push --accept-data-loss
+
+# With this:
+            npx prisma generate
+            npx prisma migrate deploy
+            # First deploy only (creates roles/admin/reference data):
+            # npx prisma db seed
+```
+
+Why:
+- **`prisma migrate deploy`** applies your committed migration files (`prisma/migrations/`) in order, tracked in `_prisma_migrations` — safe, repeatable, auditable, **no surprise data loss**. (This is the right choice for projects that already use migrations, e.g. one with a `db:migrate` script.)
+- **`prisma db seed`** inserts initial data (default admin, RBAC roles, reference data). Run it **only on the first deploy** (or make the seed idempotent), otherwise data gets duplicated.
+- **Requirement:** commit your `prisma/migrations/` folder (generated locally with `prisma migrate dev`). `migrate deploy` needs those files; `db push` does not.
+
+## Package Managers & Workspaces (Monorepo) Support
+The tool auto-detects the package manager from the lockfile and lets you confirm/override it:
+
+| Lockfile | Package manager |
+|---|---|
+| `package-lock.json` | npm |
+| `pnpm-lock.yaml` | pnpm (Corepack enabled) |
+| `yarn.lock` | yarn (Corepack enabled) |
+
+If your monorepo uses **workspaces** (npm/pnpm/yarn) or **Turbo** — i.e. the only lockfile lives at the repo root and the sub-packages don't have their own lockfile — answer **Yes** to the workspaces question for that part. The generated workflow then:
+- Installs at the **repo root** with the detected package manager (`npm ci` / `pnpm install --frozen-lockfile` / `yarn install --frozen-lockfile`), so install no longer fails inside the sub-folder.
+- Builds at the **repo root** (`<pm> run build`), so Turbo / root build scripts compile shared packages in the right order.
+- For SPA: deploys just the built `dist`/`build` folder of the sub-package.
+- For Node.js: deploys the whole repo, runs the production install at the root on the VPS (`npm ci --production` / `pnpm install --prod` / `yarn install --production`), then starts the app from its sub-folder with your chosen start script.
+
+**Examples:**
+- A **npm-workspaces** monorepo (Next.js + NestJS + a shared package): two parts, both `Node.js`, both *workspaces = Yes*; the NestJS part uses start script `start:prod` and Prisma + PostgreSQL.
+- A **pnpm + Turbo** monorepo: same flow — just pick `pnpm` when prompted (it's auto-detected from `pnpm-lock.yaml`).
 
 ## How the Auto Port System Works
 
