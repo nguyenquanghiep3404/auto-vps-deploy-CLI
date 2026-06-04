@@ -163,10 +163,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
 ${corepackStep}${envStep}
@@ -222,10 +222,10 @@ jobs:
     runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
 ${corepackStep}${envStep}
@@ -274,7 +274,7 @@ jobs:
     runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -333,7 +333,7 @@ jobs:
     runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 ${envStep}
       - name: Copy files to VPS via rsync
         env:
@@ -374,10 +374,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
 ${corepackStep}${envStep}
@@ -419,10 +419,10 @@ jobs:
     runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
 ${corepackStep}${envStep}
@@ -461,7 +461,7 @@ jobs:
     runs-on: ubuntu-latest${getWorkingDirConfig(workingDir)}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Copy files to VPS via rsync
         env:

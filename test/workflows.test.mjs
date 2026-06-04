@@ -281,3 +281,17 @@ test('Node version build = runtime (22) và npm ci có fallback', () => {
     assert.ok(!content.includes("node-version: '26'"), 'không còn Node 26');
     assert.match(content, /npm ci \|\| npm install/);
 });
+
+test('Actions dùng @v4 (checkout/setup-node), không còn @v3 deprecated', () => {
+    const node = gen({ projectType: NODE, domain: 'n.com', role: 'Fullstack (Gốc)', workingDir: './', usePrisma: false, port: 3001, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true });
+    const spa = gen({ projectType: SPA, domain: 's.com', role: 'Fullstack (Gốc)', workingDir: './', buildDir: 'dist', isWorkspace: false, packageManager: 'npm' });
+    const stat = gen({ projectType: STATIC, domain: 'st.com', role: 'Fullstack (Gốc)', workingDir: './' });
+    const lar = gen({ projectType: LARAVEL, domain: 'l.com', role: 'Fullstack (Gốc)', workingDir: './', envSecretName: 'ENV_FILE', phpVersion: '8.2' });
+    for (const { content } of [node, spa, stat, lar]) {
+        assert.ok(!content.includes('@v3'), 'không còn action @v3 (deprecated)');
+    }
+    assert.match(node.content, /actions\/checkout@v4/);
+    assert.match(node.content, /actions\/setup-node@v4/);
+    assert.match(spa.content, /actions\/setup-node@v4/);
+    assert.match(stat.content, /actions\/checkout@v4/);
+});
