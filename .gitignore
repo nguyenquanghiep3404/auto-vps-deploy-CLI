@@ -2,3 +2,9 @@ node_modules/
 .env
 .DS_Store
 *.log
+
+# Khóa SSH/cert sinh ra lúc chạy hoặc test — KHÔNG bao giờ commit
+*.pub
+*.pem
+id_rsa
+id_rsa.*
