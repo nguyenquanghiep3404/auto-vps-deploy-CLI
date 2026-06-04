@@ -13,6 +13,7 @@ Phiên bản này vá những "lỗ hổng" trước đây làm hỏng các app 
 - **Hỗ trợ mọi package manager — npm / pnpm / yarn (tự nhận diện)**: Tool tự đoán theo lockfile (`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`) và cho bạn xác nhận hoặc đổi. Sau đó sinh đúng lệnh install/build/runtime và bật **Corepack** cho pnpm/yarn. Monorepo dùng **Turbo** cũng chạy được (build ở thư mục gốc repo).
 - **Hỗ trợ workspaces (Monorepo)**: Nếu package con không có lockfile riêng (lockfile chỉ ở thư mục gốc), hãy chọn chế độ *workspaces* — khi đó install + build chạy ở gốc và chỉ deploy đúng package cần thiết.
 - **Tùy chọn start script**: Với app Node, bạn chọn được script chạy production (mặc định `start`, ví dụ `start:prod` cho NestJS) — không còn mặc định cứng `npm start`.
+- **Tự cài Node.js + PM2 + Corepack trên VPS**: Với dự án Node, tool giờ **tự nhận diện và cài** Node.js (≥20 LTS), PM2 và (cho pnpm/yarn) Corepack trên VPS. **Idempotent** — đã có thì bỏ qua, không phải chọn tay.
 - **Sửa các lỗi Laravel**: Tự sinh `APP_KEY` hợp lệ (hết lỗi 500 khi khởi động), chạy thêm `php artisan key:generate` để chắc chắn, **cài PHP-FPM đúng phiên bản bạn chọn**, và **tự dò socket** cho `fastcgi_pass` của Nginx (đã bỏ việc hard-code `php8.1-fpm.sock`).
 
 > 🔐 Mật khẩu database được sinh ra sẽ hiển thị **một lần duy nhất** ở cuối quá trình và được lưu trong Github Secret `.env` — hãy chép lại nơi an toàn.
@@ -129,6 +130,28 @@ Cách `.env` được dùng theo từng loại dự án:
 - **Laravel / PHP thuần**: ghi trước khi rsync để file `.env` lên được VPS. Riêng Laravel, `APP_KEY` hợp lệ sẽ được tự chèn nếu file của bạn chưa có.
 
 > ⚠️ **Lưu ý MongoDB**: MongoDB cài local mặc định không bật xác thực. Nếu dùng Prisma + MongoDB, bạn phải cấu hình thêm **Replica Set** (Prisma bắt buộc). MySQL và PostgreSQL thì chạy được ngay.
+
+## Prisma cho Production — `migrate deploy` + `db seed` (chỉnh tay)
+Mặc định, workflow Node do tool sinh ra dùng **`prisma db push --accept-data-loss`**. Lệnh này ép DB giống schema, **không có lịch sử migration** và **có thể xoá dữ liệu** khi thay đổi schema cần bỏ cột/bảng. Rất hợp để làm thử, nhưng **nguy hiểm với app thật đang có dữ liệu** (đơn hàng, khách hàng...), và **không chạy seed**.
+
+Khi lên production, hãy **tự sửa tay** trong file `deploy*.yml` thành migration + seed:
+
+```yaml
+# Thay khối này:
+            npx prisma generate
+            npx prisma db push --accept-data-loss
+
+# Bằng khối này:
+            npx prisma generate
+            npx prisma migrate deploy
+            # Chỉ ở LẦN DEPLOY ĐẦU (tạo role/admin/dữ liệu nền):
+            # npx prisma db seed
+```
+
+Vì sao:
+- **`prisma migrate deploy`** áp các file migration đã commit (`prisma/migrations/`) theo đúng thứ tự, ghi lại trong bảng `_prisma_migrations` — an toàn, lặp lại được, kiểm soát được, **không mất dữ liệu bất ngờ**. (Đúng cho dự án đã đi theo migration, vd có script `db:migrate`.)
+- **`prisma db seed`** nạp dữ liệu khởi tạo (admin mặc định, các role RBAC, dữ liệu nền). Chỉ chạy ở **lần deploy đầu tiên** (hoặc viết seed kiểu idempotent), nếu không dữ liệu sẽ bị nhân đôi.
+- **Điều kiện:** phải commit thư mục `prisma/migrations/` (sinh ở máy dev bằng `prisma migrate dev`). `migrate deploy` cần các file này; `db push` thì không.
 
 ## Hỗ Trợ Package Manager & Workspaces (Monorepo)
 Tool tự nhận diện package manager theo lockfile và cho bạn xác nhận/đổi:

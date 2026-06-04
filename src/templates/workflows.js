@@ -123,7 +123,8 @@ function getNodeWorkflow(opts) {
             cmds.prod,
             vpsAppDir !== vpsRoot ? `cd ${vpsAppDir}` : '',
             ...prismaLines,
-            pm2RestartCmd
+            pm2RestartCmd,
+            'pm2 save'
         ]);
 
         return `name: Deploy Node.js App (Monorepo Workspace)
@@ -180,7 +181,8 @@ ${buildStep}
         corepackVps,
         cmds.prod,
         ...prismaLines,
-        pm2RestartCmd
+        pm2RestartCmd,
+        'pm2 save'
     ]);
 
     return `name: Deploy Node.js App

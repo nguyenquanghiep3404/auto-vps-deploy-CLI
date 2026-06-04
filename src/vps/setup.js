@@ -161,6 +161,60 @@ export async function setupWebserverOnVPS({ host, username, password, domain, pr
 }
 
 /**
+ * Đảm bảo VPS có Node.js (>=20), PM2 và (tuỳ chọn) Corepack cho app Node.
+ * Idempotent: đã có thì bỏ qua, chỉ cài phần còn thiếu.
+ * options: { needCorepack: boolean } — bật Corepack khi dùng pnpm/yarn.
+ */
+export async function ensureNodeRuntimeOnVPS(host, username, password, options = {}) {
+    const { needCorepack = false } = options;
+    const ssh = new NodeSSH();
+    try {
+        await ssh.connect({ host, username, password });
+        console.log(`   → Kiểm tra & cài đặt Node.js (>=20), PM2${needCorepack ? ', Corepack' : ''} (bỏ qua nếu đã có)...`);
+
+        const corepackBlock = needCorepack
+            ? 'sudo corepack enable >/dev/null 2>&1 || corepack enable >/dev/null 2>&1 || true\n'
+            : '';
+
+        // Lưu ý: chỉ dùng $VAR và $(...) trong bash; tránh ${...} để khỏi đụng template literal của JS.
+        const script = `
+set -e
+command -v curl >/dev/null 2>&1 || (sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl)
+NEED_NODE=1
+if command -v node >/dev/null 2>&1; then
+  CURMAJ=$(node -v | sed 's/[^0-9.]*//g' | cut -d. -f1)
+  if [ -n "$CURMAJ" ] && [ "$CURMAJ" -ge 20 ]; then NEED_NODE=0; fi
+fi
+if [ "$NEED_NODE" -eq 1 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+fi
+command -v pm2 >/dev/null 2>&1 || sudo npm install -g pm2
+${corepackBlock}sudo env PATH=$PATH pm2 startup >/dev/null 2>&1 || true
+`;
+        const res = await ssh.execCommand(script);
+        if (res.code !== 0) {
+            console.log('   ⚠️  Có thể chưa cài đủ Node/PM2. Chi tiết:', res.stderr);
+        }
+
+        // Xác minh bằng shell KHÔNG tương tác (đúng kiểu mà bước deploy sẽ chạy).
+        const verify = await ssh.execCommand(`node -v; npm -v; pm2 -v${needCorepack ? '; corepack --version' : ''}`);
+        if (verify.code === 0) {
+            console.log('   ✅ Node/PM2 sẵn sàng: ' + (verify.stdout || '').trim().replace(/\n/g, ' | '));
+        } else {
+            console.log('   ⚠️  Không xác minh được Node/PM2 qua SSH (có thể do PATH). Chi tiết:', verify.stderr);
+        }
+        return true;
+    } catch (error) {
+        // Không chặn toàn bộ quy trình — chỉ cảnh báo để người dùng tự xử lý.
+        console.log('   ⚠️  Lỗi khi cài đặt Node/PM2 trên VPS: ' + error.message);
+        return false;
+    } finally {
+        ssh.dispose();
+    }
+}
+
+/**
  * Cài đặt database server (MySQL/PostgreSQL/MongoDB) trên VPS và tạo sẵn database + user.
  * dbConfig: { engine: 'mysql'|'postgresql'|'mongodb', dbName, dbUser, dbPassword }
  */

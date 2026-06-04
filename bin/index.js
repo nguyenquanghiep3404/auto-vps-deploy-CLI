@@ -4,7 +4,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { generateSSHKeys, installPublicKeyToVPS, scanUsedPorts, findAvailablePorts } from '../src/utils/ssh.js';
 import { checkGithubAuth, loginGithub, setGithubSecret, installGithubCli } from '../src/github/secrets.js';
-import { setupWebserverOnVPS, setupDatabaseOnVPS } from '../src/vps/setup.js';
+import { setupWebserverOnVPS, setupDatabaseOnVPS, ensureNodeRuntimeOnVPS } from '../src/vps/setup.js';
 import { generateWorkflowFile } from '../src/templates/workflows.js';
 import {
     readEnvFile,
@@ -546,6 +546,15 @@ async function main() {
                 part.dbPassword = dbPassword;
             }
             console.log(chalk.green('✅ Xong Bước 1.5.'));
+        }
+
+        // ---- Bước 1.6: Đảm bảo Node.js + PM2 (+ Corepack) cho app Node ----
+        const nodeParts = parts.filter(p => p.projectType.includes('Node.js'));
+        if (nodeParts.length > 0) {
+            console.log(chalk.blue('\n▶️  Bước 1.6: Cài đặt Node.js + PM2 (+ Corepack) cho ứng dụng Node...'));
+            const needCorepack = nodeParts.some(p => p.packageManager === 'pnpm' || p.packageManager === 'yarn');
+            await ensureNodeRuntimeOnVPS(vpsHost, vpsUser, vpsPassword, { needCorepack });
+            console.log(chalk.green('✅ Xong Bước 1.6.'));
         }
 
         // ---- Bước 2: Sinh SSH Key (1 lần duy nhất) ----
