@@ -18,7 +18,7 @@ import {
     mergeEnvContent
 } from '../src/utils/env.js';
 import { detectPackageManager, detectWorkspace, hasBuildScript } from '../src/utils/project.js';
-import { execaCommand } from 'execa';
+import { execa, execaCommand } from 'execa';
 import path from 'path';
 
 /**
@@ -626,13 +626,26 @@ async function main() {
         // ---- Bước 5: Auto push code ----
         console.log(chalk.blue('\n▶️  Bước 5: Tự động đẩy code lên Github...'));
         try {
-            await execaCommand('git add .');
-            await execaCommand('git commit -m "Auto config VPS Deploy Actions"');
-            await execaCommand('git branch -M main');
-            await execaCommand('git push -u origin main');
+            // Dùng execa với tham số dạng MẢNG. execaCommand() tách chuỗi theo dấu cách và
+            // KHÔNG hiểu dấu nháy, nên 'git commit -m "Auto config ..."' bị cắt thành nhiều
+            // pathspec và luôn lỗi. Truyền mảng để message nhiều từ vẫn là 1 đối số.
+            await execa('git', ['add', '.']);
+
+            // Chỉ commit khi thực sự có thay đổi, tránh báo lỗi nhầm "nothing to commit" khi chạy lại.
+            const status = await execa('git', ['status', '--porcelain']);
+            if (status.stdout.trim()) {
+                await execa('git', ['commit', '-m', 'Auto config VPS Deploy Actions']);
+            } else {
+                console.log(chalk.gray('   (Không có thay đổi mới để commit, bỏ qua bước commit.)'));
+            }
+
+            await execa('git', ['branch', '-M', 'main']);
+            await execa('git', ['push', '-u', 'origin', 'main']);
             console.log(chalk.green('✅ Đã tự động đẩy code lên Github thành công! Hãy mở tab Actions để xem tiến trình deploy nhé!'));
         } catch (e) {
             console.log(chalk.yellow('⚠️  Không thể tự động đẩy code lên Github. Có thể do code chưa có thay đổi nào mới hoặc lỗi mạng.'));
+            // In lỗi thật để dễ chẩn đoán (trước đây bị nuốt mất).
+            console.log(chalk.gray('   Chi tiết: ' + (e.stderr || e.shortMessage || e.message || String(e))));
             console.log(chalk.yellow('Vui lòng tự gõ lệnh git push bằng tay sau khi quá trình này kết thúc.'));
         }
 
