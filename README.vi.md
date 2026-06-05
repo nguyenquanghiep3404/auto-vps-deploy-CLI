@@ -48,7 +48,11 @@ Phiên bản này vá những "lỗ hổng" trước đây làm hỏng các app 
 ## Cài Đặt (Global)
 Tại bất kỳ máy tính nào, bạn chỉ cần mở Terminal (Command Prompt / PowerShell) lên và gõ:
 ```bash
+# Dùng npm
 npm install -g git+https://github.com/nguyenquanghiep3404/auto-vps-deploy-CLI.git
+
+# Dùng pnpm
+pnpm add -g git+https://github.com/nguyenquanghiep3404/auto-vps-deploy-CLI.git
 ```
 Chỉ sau khoảng 30 giây, máy tính của bạn sẽ sở hữu một "chuyên gia DevOps" mang tên `deploy-vps`.
 
