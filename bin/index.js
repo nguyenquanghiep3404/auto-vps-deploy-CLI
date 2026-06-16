@@ -15,6 +15,8 @@ import {
     buildPrismaDatabaseUrl,
     buildLaravelDbEnv,
     buildManagedDbEnvLines,
+    detectCorsKeys,
+    upsertEnvKey,
     envHasKey,
     mergeEnvContent,
     stripAppPort
@@ -309,6 +311,73 @@ function assignPort(domain, allUsedPorts, existingDomainPorts) {
     const [port] = findAvailablePorts(allUsedPorts, 1);
     allUsedPorts.push(port);
     return { port, reused: false };
+}
+
+/**
+ * Cấu hình CORS cho các phần backend (Node/PHP) trong MONOREPO nhiều phần.
+ * Triết lý: KHÔNG đặt cứng tên biến (CORS_ORIGINS không phải chuẩn — mỗi backend đặt tên khác nhau,
+ * có khi không dùng .env). Thay vào đó TỰ DÒ tên biến CORS thật trong .env/.env.example của phần,
+ * rồi gợi ý đặt = origin của các phần khác (thường là frontend). Không dò được thì chỉ CẢNH BÁO.
+ * Lưu lựa chọn vào part.corsEnv = { KEY: value } để Bước 3 nạp vào secret .env.
+ */
+async function collectCorsConfig(parts) {
+    // CORS chỉ phát sinh khi có NHIỀU origin. App đơn (1 phần): frontend + backend cùng origin -> bỏ qua.
+    if (parts.length < 2) return;
+    const backendParts = parts.filter(p => p.projectType.includes('Node.js') || p.projectType.includes('PHP'));
+    if (backendParts.length === 0) return;
+
+    console.log(chalk.cyan.bold('\n🌐 ──── Cấu hình CORS (cho phép frontend gọi backend) ────'));
+    console.log(chalk.gray('   CORS là cơ chế của trình duyệt; backend phải whitelist ĐÚNG origin (domain) của frontend.'));
+
+    for (const part of backendParts) {
+        const others = parts.filter(p => p !== part);
+        if (others.length === 0) continue;
+        // Gợi ý: origin của các phần KHÁC (https://domain). Người dùng có thể sửa/bỏ bớt.
+        const suggested = others.map(p => `https://${p.domain}`).join(',');
+
+        // Dò tên biến CORS trong .env người dùng cung cấp + .env.example của thư mục phần.
+        const cleanDir = (part.workingDir || './').replace(/^\.\//, '').replace(/\/+$/, '');
+        const workDirAbs = cleanDir ? path.join(process.cwd(), cleanDir) : process.cwd();
+        const exampleContent = readEnvFile(path.join(workDirAbs, '.env.example'));
+        const scanText = [part.envFileContent, exampleContent].filter(Boolean).join('\n');
+        const detected = detectCorsKeys(scanText);
+
+        if (detected.length > 0) {
+            for (const d of detected) {
+                const hasLocalhost = /localhost|127\.0\.0\.1/i.test(d.value);
+                console.log(chalk.gray(`   • ${part.name}: phát hiện biến '${chalk.bold(d.key)}'${d.value ? ` = ${d.value}` : ''}`)
+                    + (hasLocalhost ? chalk.yellow('  (đang trỏ localhost!)') : ''));
+                const { val } = await inquirer.prompt([{
+                    type: 'input',
+                    name: 'val',
+                    message: `Origin frontend được phép cho '${d.key}' (Enter = dùng gợi ý, để trống = bỏ qua):`,
+                    default: suggested
+                }]);
+                const v = (val || '').trim();
+                if (v) part.corsEnv = { ...(part.corsEnv || {}), [d.key]: v };
+            }
+        } else {
+            console.log(chalk.yellow(`   ⚠️  ${part.name}: KHÔNG dò thấy biến CORS trong .env/.env.example.`));
+            console.log(chalk.gray(`      → Nếu backend chặn CORS, hãy whitelist "${suggested}" trong code/config của backend (vd cors() / config/cors.php).`));
+            const { addManual } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'addManual',
+                message: `Vẫn muốn thêm thủ công 1 biến CORS vào .env của ${part.name}?`,
+                default: false
+            }]);
+            if (addManual) {
+                const ans = await inquirer.prompt([
+                    {
+                        type: 'input', name: 'key', message: 'Tên biến CORS:', default: 'CORS_ORIGINS',
+                        validate: i => /^[A-Za-z_][A-Za-z0-9_]*$/.test((i || '').trim()) ? true : 'Tên biến không hợp lệ (chữ, số, gạch dưới; không bắt đầu bằng số).'
+                    },
+                    { type: 'input', name: 'val', message: 'Giá trị (origin frontend):', default: suggested }
+                ]);
+                const v = (ans.val || '').trim();
+                if (v) part.corsEnv = { ...(part.corsEnv || {}), [ans.key.trim()]: v };
+            }
+        }
+    }
 }
 
 async function main() {
@@ -707,6 +776,11 @@ async function main() {
     }
 
     // ========================================
+    // 4.5 Cấu hình CORS cho backend (chỉ Monorepo nhiều phần)
+    // ========================================
+    await collectCorsConfig(parts);
+
+    // ========================================
     // 5. BẮT ĐẦU QUÁ TRÌNH TỰ ĐỘNG HÓA
     // ========================================
     try {
@@ -797,9 +871,18 @@ async function main() {
                 generatedLines.push(`APP_KEY=${generateLaravelAppKey()}`);
             }
 
+            let userEnv = part.envFileContent;
+
+            // CORS: đặt/sửa biến CORS đã chọn ngay TRONG .env của user (upsert) — nếu key đã có thì
+            // thay giá trị (vd localhost -> domain thật), chưa có thì thêm. Dùng tên biến backend thực dùng.
+            if (part.corsEnv) {
+                for (const [key, value] of Object.entries(part.corsEnv)) {
+                    userEnv = upsertEnvKey(userEnv, key, value);
+                }
+            }
+
             // App Node có cổng được gán: loại PORT cứng trong .env của user và chèn PORT do tool gán,
             // để .env trên VPS không đè ngược cổng (app vẫn phải đọc process.env.PORT trong code).
-            let userEnv = part.envFileContent;
             if (part.projectType.includes('Node.js') && part.port) {
                 userEnv = stripAppPort(userEnv);
                 generatedLines.push(`PORT=${part.port}`);
