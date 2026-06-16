@@ -105,6 +105,36 @@ export async function scanUsedPorts(host, username, password) {
 }
 
 /**
+ * Đọc các cấu hình Nginx có sẵn để lấy cổng ĐÃ gán cho từng domain ở lần deploy trước.
+ * Tool đặt file config theo tên domain (/etc/nginx/sites-available/<domain>) và proxy tới
+ * 127.0.0.1:<port>. Nhờ vậy lần chạy lại, ta TÁI SỬ DỤNG đúng cổng cũ thay vì gán cổng mới
+ * (tránh cổng "trôi" và bỏ lại process PM2 cũ). Trả về map { domain: port }.
+ */
+export async function scanDomainPorts(host, username, password) {
+    const ssh = new NodeSSH();
+    try {
+        await ssh.connect({ host, username, password });
+        // Với mỗi file config: in "tên-file cổng" nếu tìm thấy proxy_pass tới 127.0.0.1:<port>.
+        const cmd = "for f in /etc/nginx/sites-available/*; do [ -f \"$f\" ] || continue; "
+            + "p=$(grep -oE 'proxy_pass http://127\\.0\\.0\\.1:[0-9]+' \"$f\" 2>/dev/null | grep -oE '[0-9]+$' | head -n1); "
+            + "[ -n \"$p\" ] && echo \"$(basename \"$f\") $p\"; done";
+        const result = await ssh.execCommand(cmd);
+        const map = {};
+        for (const line of (result.stdout || '').split('\n')) {
+            const [domain, port] = line.trim().split(/\s+/);
+            const p = parseInt(port, 10);
+            if (domain && !isNaN(p)) map[domain] = p;
+        }
+        return map;
+    } catch (error) {
+        // Không quét được -> coi như chưa có cấu hình cũ (sẽ gán cổng mới).
+        return {};
+    } finally {
+        ssh.dispose();
+    }
+}
+
+/**
  * Tìm port trống tiếp theo trong dãy 3000-3999
  * usedPorts: mảng các port đã bị chiếm
  * count: số lượng port trống cần tìm

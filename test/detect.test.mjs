@@ -15,7 +15,8 @@ import {
     detectProject,
     detectDatabase,
     detectDatabaseUrlEngine,
-    databaseLabel
+    databaseLabel,
+    detectNodeVersion
 } from '../src/utils/detect.js';
 
 let root;
@@ -166,6 +167,29 @@ test('detectPhpVersion: trích X.Y từ composer require.php', () => {
 test('detectPhpVersion: null khi không khai báo', () => {
     write(root, 'composer.json', JSON.stringify({ require: {} }));
     assert.equal(detectPhpVersion(root), null);
+});
+
+// ---------------- detectNodeVersion ----------------
+
+test('detectNodeVersion: từ .nvmrc (ưu tiên cao nhất)', () => {
+    write(root, '.nvmrc', 'v20.11.0\n');
+    writePkg(root, { engines: { node: '>=18' } });
+    assert.equal(detectNodeVersion(root), '20');
+});
+
+test('detectNodeVersion: từ engines.node trong package.json', () => {
+    writePkg(root, { engines: { node: '>=18.17' } });
+    assert.equal(detectNodeVersion(root), '18');
+    writePkg(root, { engines: { node: '20.x' } });
+    assert.equal(detectNodeVersion(root), '20');
+});
+
+test('detectNodeVersion: null khi không khai báo / giá trị vô lý', () => {
+    writePkg(root, { dependencies: { express: '^4' } });
+    assert.equal(detectNodeVersion(root), null);
+    write(root, '.nvmrc', 'lts/iron');     // không có số 2 chữ số -> null
+    writePkg(root, {});
+    assert.equal(detectNodeVersion(root), null);
 });
 
 // ---------------- detectDatabase ----------------

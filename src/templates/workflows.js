@@ -123,8 +123,9 @@ function buildRsync(src, dest, extra = []) {
 }
 
 function getNodeWorkflow(opts) {
-    const { domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild } = opts;
+    const { domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild, nodeVersion } = opts;
     const cmds = pmCommands(packageManager);
+    const nodeVer = nodeVersion || '22';
     const cleanDir = cleanWorkingDir(workingDir);
     const pm2Name = `app-${domain}`;
     const startCmd = startScript || 'start';
@@ -181,7 +182,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '${nodeVer}'
 ${corepackStep}${envStep}
       - name: Install Dependencies (workspace root)
         run: ${cmds.ci}
@@ -240,7 +241,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '${nodeVer}'
 ${corepackStep}${envStep}
       - name: Install Dependencies
         run: ${cmds.ci}
@@ -363,8 +364,9 @@ ${envStep}
 }
 
 function getSpaWorkflow(opts) {
-    const { domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager } = opts;
+    const { domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager, nodeVersion } = opts;
     const cmds = pmCommands(packageManager);
+    const nodeVer = nodeVersion || '22';
     const cleanDir = cleanWorkingDir(workingDir);
     const corepackStep = getCorepackStep(cmds);
 
@@ -392,7 +394,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '${nodeVer}'
 ${corepackStep}${envStep}
       - name: Install Dependencies (workspace root)
         run: ${cmds.ci}
@@ -438,7 +440,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '${nodeVer}'
 ${corepackStep}${envStep}
       - name: Install Dependencies
         run: ${cmds.ci}
@@ -510,7 +512,8 @@ export function generateWorkflowFile(options) {
         phpVersion,
         packageManager,
         startScript,
-        hasBuild
+        hasBuild,
+        nodeVersion
     } = options;
 
     const workflowsDir = path.join(process.cwd(), '.github', 'workflows');
@@ -521,13 +524,13 @@ export function generateWorkflowFile(options) {
 
     let workflowContent = '';
     if (projectType.includes('Node.js')) {
-        workflowContent = getNodeWorkflow({ domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild });
+        workflowContent = getNodeWorkflow({ domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild, nodeVersion });
     } else if (projectType === 'PHP (Laravel)') {
         workflowContent = getLaravelWorkflow(domain, workingDir, envSecretName, phpVersion);
     } else if (projectType === 'PHP (Thuần)') {
         workflowContent = getPurePhpWorkflow(domain, workingDir, envSecretName);
     } else if (projectType === 'React/Vite/Vue (SPA)') {
-        workflowContent = getSpaWorkflow({ domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager });
+        workflowContent = getSpaWorkflow({ domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager, nodeVersion });
     } else {
         workflowContent = getStaticWorkflow(domain, workingDir);
     }

@@ -118,6 +118,32 @@ export function detectBuildDir(dirAbs) {
     return 'dist';
 }
 
+/**
+ * Đoán phiên bản Node (major) cần dùng: ưu tiên `.nvmrc`, rồi `engines.node` trong package.json.
+ * Lấy số major đầu tiên tìm thấy (vd ">=20" -> "20", "18.17.0" -> "18"). Trả về chuỗi major
+ * hoặc null nếu không khai báo (khi đó caller dùng mặc định). Bỏ qua giá trị vô lý (<12 hoặc >40).
+ */
+export function detectNodeVersion(dirAbs) {
+    const pick = (raw) => {
+        const m = String(raw).match(/(\d{2})/);
+        if (!m) return null;
+        const major = parseInt(m[1], 10);
+        return (major >= 12 && major <= 40) ? String(major) : null;
+    };
+    try {
+        const nvmrc = fs.readFileSync(path.join(dirAbs, '.nvmrc'), 'utf8').trim();
+        const v = pick(nvmrc);
+        if (v) return v;
+    } catch (e) { /* không có .nvmrc */ }
+    const pkg = readPkg(dirAbs);
+    const eng = pkg && pkg.engines && pkg.engines.node;
+    if (eng) {
+        const v = pick(eng);
+        if (v) return v;
+    }
+    return null;
+}
+
 /** Đoán start script production: NestJS thường có start:prod, nếu không thì start. */
 export function detectStartScript(dirAbs) {
     const pkg = readPkg(dirAbs);

@@ -140,10 +140,14 @@ export async function setupWebserverOnVPS({ host, username, password, domain, pr
  */
 export async function ensureNodeRuntimeOnVPS(host, username, password, options = {}) {
     const { needCorepack = false } = options;
+    // Phiên bản Node (major) cần đảm bảo trên VPS. Lấy từ tự nhận diện (engines.node/.nvmrc),
+    // nhưng có SÀN tối thiểu 20 (LTS) để các app hiện đại chạy được; mặc định 22 nếu không rõ.
+    const wanted = parseInt(options.nodeVersion, 10);
+    const nodeMajor = Number.isInteger(wanted) ? Math.max(wanted, 20) : 22;
     const ssh = new NodeSSH();
     try {
         await ssh.connect({ host, username, password });
-        console.log(`   → Kiểm tra & cài đặt Node.js (>=20), PM2${needCorepack ? ', Corepack' : ''} (bỏ qua nếu đã có)...`);
+        console.log(`   → Kiểm tra & cài đặt Node.js (>=${nodeMajor}), PM2${needCorepack ? ', Corepack' : ''} (bỏ qua nếu đã có)...`);
 
         const corepackBlock = needCorepack
             ? 'sudo corepack enable >/dev/null 2>&1 || corepack enable >/dev/null 2>&1 || true\n'
@@ -156,10 +160,10 @@ command -v curl >/dev/null 2>&1 || (sudo apt-get -o DPkg::Lock::Timeout=300 upda
 NEED_NODE=1
 if command -v node >/dev/null 2>&1; then
   CURMAJ=$(node -v | sed 's/[^0-9.]*//g' | cut -d. -f1)
-  if [ -n "$CURMAJ" ] && [ "$CURMAJ" -ge 20 ]; then NEED_NODE=0; fi
+  if [ -n "$CURMAJ" ] && [ "$CURMAJ" -ge ${nodeMajor} ]; then NEED_NODE=0; fi
 fi
 if [ "$NEED_NODE" -eq 1 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  curl -fsSL https://deb.nodesource.com/setup_${nodeMajor}.x | sudo -E bash -
   sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y nodejs
 fi
 command -v pm2 >/dev/null 2>&1 || sudo npm install -g pm2

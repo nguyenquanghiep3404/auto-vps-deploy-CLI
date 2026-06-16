@@ -316,6 +316,31 @@ test('Node version build = runtime (22) và npm ci có fallback', () => {
     assert.match(content, /npm ci \|\| npm install/);
 });
 
+test('nodeVersion: dùng phiên bản tự nhận diện, mặc định 22 khi không truyền', () => {
+    // Có nodeVersion -> dùng đúng phiên bản đó
+    const v20 = gen({
+        projectType: NODE, domain: 'v20.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3001, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true,
+        nodeVersion: '20'
+    });
+    assert.match(v20.content, /node-version: '20'/);
+    assert.ok(!v20.content.includes("node-version: '22'"));
+
+    // SPA cũng nhận nodeVersion
+    const spa = gen({
+        projectType: SPA, domain: 'spa.com', role: 'Fullstack (Gốc)', workingDir: './',
+        buildDir: 'dist', isWorkspace: false, packageManager: 'npm', nodeVersion: '18'
+    });
+    assert.match(spa.content, /node-version: '18'/);
+
+    // Không truyền -> mặc định 22 (giữ tương thích)
+    const def = gen({
+        projectType: NODE, domain: 'def.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3002, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true
+    });
+    assert.match(def.content, /node-version: '22'/);
+});
+
 test('Actions dùng @v4 (checkout/setup-node), không còn @v3 deprecated', () => {
     const node = gen({ projectType: NODE, domain: 'n.com', role: 'Fullstack (Gốc)', workingDir: './', usePrisma: false, port: 3001, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true });
     const spa = gen({ projectType: SPA, domain: 's.com', role: 'Fullstack (Gốc)', workingDir: './', buildDir: 'dist', isWorkspace: false, packageManager: 'npm' });
