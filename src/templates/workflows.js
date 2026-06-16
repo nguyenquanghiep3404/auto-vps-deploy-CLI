@@ -122,8 +122,24 @@ function buildRsync(src, dest, extra = []) {
     return `rsync ${flags} ${src} $USER@$HOST:${dest}`;
 }
 
+/**
+ * Sinh step "Build Project" chạy trên runner (build TRƯỚC khi rsync, vì dist/ thường không nằm
+ * trong git). buildWorkingDir: thư mục chạy build — rỗng nghĩa là dùng thư mục mặc định của job.
+ * Với workspace mà CHỈ package con có script build (gốc không có), cần trỏ working-directory vào
+ * package con (deps đã hoist về gốc nên build vẫn chạy) để dist/ được tạo, tránh thiếu dist khi deploy.
+ */
+function makeBuildStep(cmds, hasBuild, buildWorkingDir) {
+    if (!hasBuild) return '';
+    const wd = buildWorkingDir ? `
+        working-directory: ${buildWorkingDir}` : '';
+    return `
+      - name: Build Project${wd}
+        run: ${cmds.run('build')}
+`;
+}
+
 function getNodeWorkflow(opts) {
-    const { domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild, nodeVersion } = opts;
+    const { domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild, buildAtRoot, nodeVersion } = opts;
     const cmds = pmCommands(packageManager);
     const nodeVer = nodeVersion || '22';
     const cleanDir = cleanWorkingDir(workingDir);
@@ -138,16 +154,14 @@ function getNodeWorkflow(opts) {
     const corepackVps = cmds.needCorepack ? 'corepack enable 2>/dev/null || sudo corepack enable 2>/dev/null || true' : '';
 
     const prismaLines = usePrisma ? ['npx prisma generate', 'npx prisma db push --accept-data-loss'] : [];
-    const buildStep = hasBuild
-        ? `
-      - name: Build Project
-        run: ${cmds.run('build')}
-`
-        : '';
 
     if (isWorkspace) {
-        // Monorepo workspaces (npm/pnpm/yarn + Turbo): cài & build ở GỐC repo.
-        // Triển khai cả repo lên VPS, app chạy trong thư mục con.
+        // Monorepo workspaces (npm/pnpm/yarn + Turbo): cài ở GỐC repo (deps hoist về gốc).
+        // Build: nếu gốc có script build (vd turbo) -> build ở gốc; nếu chỉ package con có ->
+        // build NGAY trong package con. Triển khai cả repo lên VPS, app chạy trong thư mục con.
+        // buildAtRoot mặc định true (build ở gốc) để giữ tương thích; chỉ build trong package con
+        // khi được chỉ định rõ là false (gốc không có script build).
+        const buildStep = makeBuildStep(cmds, hasBuild, buildAtRoot === false ? cleanDir : '');
         const envTarget = cleanDir ? `${cleanDir}/.env` : '.env';
         const envStep = getEnvStep(envSecretName, envTarget);
         const vpsRoot = `/var/www/${domain}`;
@@ -210,7 +224,9 @@ ${buildStep}
 `;
     }
 
-    // Mặc định (không phải workspace). Nguồn rsync TƯƠNG ĐỐI với working-directory (xem rsyncSourceDir).
+    // Mặc định (không phải workspace). Build chạy trong working-directory của job nên không cần
+    // chỉ định riêng. Nguồn rsync TƯƠNG ĐỐI với working-directory (xem rsyncSourceDir).
+    const buildStep = makeBuildStep(cmds, hasBuild, '');
     const rsyncSrc = rsyncSourceDir();
     const envStep = getEnvStep(envSecretName, '.env');
     const vpsScript = joinVpsScript([
@@ -364,14 +380,17 @@ ${envStep}
 }
 
 function getSpaWorkflow(opts) {
-    const { domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager, nodeVersion } = opts;
+    const { domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager, buildAtRoot, nodeVersion } = opts;
     const cmds = pmCommands(packageManager);
     const nodeVer = nodeVersion || '22';
     const cleanDir = cleanWorkingDir(workingDir);
     const corepackStep = getCorepackStep(cmds);
 
     if (isWorkspace) {
-        // Monorepo workspaces: cài & build ở GỐC repo, chỉ rsync thư mục build.
+        // Monorepo workspaces: cài ở GỐC repo, chỉ rsync thư mục build.
+        // Build ở gốc nếu gốc có script build (vd turbo); chỉ build trong package con khi buildAtRoot=false.
+        const buildWd = buildAtRoot === false ? `
+        working-directory: ${cleanDir}` : '';
         const envTarget = cleanDir ? `${cleanDir}/.env` : '.env';
         const envStep = getEnvStep(envSecretName, envTarget);
         const distPath = cleanDir ? `${cleanDir}/${buildDir}/` : `${buildDir}/`;
@@ -399,7 +418,7 @@ ${corepackStep}${envStep}
       - name: Install Dependencies (workspace root)
         run: ${cmds.ci}
 
-      - name: Build Project
+      - name: Build Project${buildWd}
         run: ${cmds.run('build')}
 
       - name: Copy files to VPS via rsync
@@ -513,6 +532,7 @@ export function generateWorkflowFile(options) {
         packageManager,
         startScript,
         hasBuild,
+        buildAtRoot,
         nodeVersion
     } = options;
 
@@ -524,13 +544,13 @@ export function generateWorkflowFile(options) {
 
     let workflowContent = '';
     if (projectType.includes('Node.js')) {
-        workflowContent = getNodeWorkflow({ domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild, nodeVersion });
+        workflowContent = getNodeWorkflow({ domain, workingDir, usePrisma, port, envSecretName, isWorkspace, packageManager, startScript, hasBuild, buildAtRoot, nodeVersion });
     } else if (projectType === 'PHP (Laravel)') {
         workflowContent = getLaravelWorkflow(domain, workingDir, envSecretName, phpVersion);
     } else if (projectType === 'PHP (Thuần)') {
         workflowContent = getPurePhpWorkflow(domain, workingDir, envSecretName);
     } else if (projectType === 'React/Vite/Vue (SPA)') {
-        workflowContent = getSpaWorkflow({ domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager, nodeVersion });
+        workflowContent = getSpaWorkflow({ domain, workingDir, buildDir, envSecretName, isWorkspace, packageManager, buildAtRoot, nodeVersion });
     } else {
         workflowContent = getStaticWorkflow(domain, workingDir);
     }
