@@ -18,6 +18,8 @@ Phiên bản này vá những "lỗ hổng" trước đây làm hỏng các app 
 
 - **Tự động nạp `.env`**: Tool đọc file `.env` local của bạn, lưu vào Github Secret và tạo lại nó trong lúc chạy workflow — cả lúc *build* (để biến Vite `VITE_*` / CRA `REACT_APP_*` hoạt động) lẫn trên *VPS* (để có `DATABASE_URL`, secret, khoá API). Không còn lỗi 500 vì thiếu `.env`.
 - **Tự động cài Database server**: Tool có thể cài **MySQL / PostgreSQL / MongoDB**, tạo database + user, sinh mật khẩu mạnh và tự chèn chuỗi kết nối vào secret `.env`. Nhờ đó `prisma db push` và `artisan migrate` đã có database thật để làm việc.
+- **Hỗ trợ Supabase (PostgreSQL Cloud) 🆕**: Nếu dùng DB cloud, chọn **Supabase** rồi dán Connection String — tool **không cài DB trên VPS**, chỉ nạp `DATABASE_URL` (và `DB_*` cho Laravel) vào secret `.env`. App trên VPS kết nối thẳng tới Supabase.
+- **Mỗi phần một domain riêng 🆕**: Trong Monorepo, tool **chặn việc dùng trùng domain** giữa các phần — tránh frontend và backend ghi đè nhau ở webroot `/var/www/<domain>`, cấu hình Nginx và **tên ứng dụng PM2** (`app-<domain>`).
 - **Biến build-time của Vite / SPA**: Với dự án SPA, file `.env` được ghi **trước** `npm run build`, nên bản build trỏ đúng endpoint API.
 - **Hỗ trợ mọi package manager — npm / pnpm / yarn (tự nhận diện)**: Tool tự đoán theo lockfile (`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`) và cho bạn xác nhận hoặc đổi. Sau đó sinh đúng lệnh install/build/runtime và bật **Corepack** cho pnpm/yarn. Monorepo dùng **Turbo** cũng chạy được (build ở thư mục gốc repo).
 - **Hỗ trợ workspaces (Monorepo)**: Nếu package con không có lockfile riêng (lockfile chỉ ở thư mục gốc), hãy chọn chế độ *workspaces* — khi đó install + build chạy ở gốc và chỉ deploy đúng package cần thiết.
@@ -129,12 +131,17 @@ Khi bạn push code lên Github, Github Actions sẽ kích hoạt cả 2 file ym
 Khi bạn chọn `Node.js`, `PHP (Laravel)` hoặc `PHP (Thuần)`, tool sẽ hỏi thêm vài câu:
 
 1. **Phiên bản PHP** (với dự án PHP): ví dụ `8.1`, `8.2`, `8.3`. Tool cài đúng PHP-FPM phiên bản đó trên VPS và trỏ Nginx vào socket đã dò được.
-2. **"Phần này có cần Database không?"** — Nếu có, chọn loại (`MySQL` / `PostgreSQL` / `MongoDB`) và tên DB + user. Tool sẽ:
-   - Cài database server trên VPS (chạy lại nhiều lần không sao).
-   - Tạo database và một user riêng với mật khẩu mạnh sinh tự động.
-   - Tạo chuỗi kết nối và thêm vào secret `.env`:
-     - Node.js → `DATABASE_URL="..."` (sẵn sàng cho Prisma).
-     - Laravel / PHP thuần → `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`.
+2. **"Phần này có cần Database không?"** — Nếu có, chọn loại (`MySQL` / `PostgreSQL` / `MongoDB` / `Supabase`).
+   - Với **MySQL / PostgreSQL / MongoDB** (DB tự cài trên VPS) — nhập tên DB + user, tool sẽ:
+     - Cài database server trên VPS (chạy lại nhiều lần không sao).
+     - Tạo database và một user riêng với mật khẩu mạnh sinh tự động.
+     - Tạo chuỗi kết nối và thêm vào secret `.env`:
+       - Node.js → `DATABASE_URL="..."` (sẵn sàng cho Prisma).
+       - Laravel / PHP thuần → `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`.
+   - Với **Supabase (PostgreSQL Cloud)** — DB nằm trên cloud, **tool KHÔNG cài gì trên VPS**. Bạn chỉ cần **dán Connection String** (Supabase → *Project Settings → Database → Connection string → URI*). Tool nạp vào secret `.env`:
+     - Node.js → `DATABASE_URL="..."` (giữ nguyên chuỗi bạn dán).
+     - Laravel / PHP thuần → tách thành `DB_*` (best-effort) **và** giữ thêm `DATABASE_URL`.
+   - 💡 *Lưu ý cho frontend*: nếu một phần là Next.js (xếp loại `Node.js`), tool vẫn hỏi câu này vì Next.js có thể truy vấn DB trực tiếp (API routes / server components). Nếu **frontend của bạn chỉ gọi API của backend** thì cứ chọn **No** — chỉ khai báo DB ở phần backend.
 3. **"Đường dẫn file .env"** — Trỏ tới file `.env` local của bạn (mặc định `.env`, hoặc `<thư-mục-phần>/.env` với monorepo). Nội dung được lưu thành Github Secret tên `ENV_FILE` (single) hoặc `ENV_FILE_<TÊNPHẦN>` (monorepo) và được workflow tạo lại tự động. Để trống nếu không có.
 
 Cách `.env` được dùng theo từng loại dự án:

@@ -132,3 +132,55 @@ export function stripAppPort(content) {
         .filter(line => !/^[ \t]*PORT[ \t]*=/.test(line))
         .join('\n');
 }
+
+/**
+ * Phân tích một connection string dạng URL (vd Supabase: postgresql://user:pass@host:5432/db).
+ * Trả về { scheme, user, pass, host, port, dbName } hoặc null nếu không phân tích được.
+ * Dùng cho DB do nhà cung cấp quản lý (managed) khi cần tách ra biến DB_* (Laravel/PHP).
+ */
+export function parseDatabaseUrl(url) {
+    try {
+        const u = new URL(String(url).trim());
+        return {
+            scheme: u.protocol.replace(/:$/, ''),
+            user: decodeURIComponent(u.username || ''),
+            pass: decodeURIComponent(u.password || ''),
+            host: u.hostname || '',
+            port: u.port || '',
+            dbName: (u.pathname || '').replace(/^\//, '')
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Sinh các dòng .env cho DB do nhà cung cấp quản lý (vd Supabase) từ connection string.
+ * - Node.js (Prisma/ORM): chỉ cần DATABASE_URL — ORM tự phân tích, giữ NGUYÊN chuỗi
+ *   người dùng dán (kể cả mật khẩu có ký tự đặc biệt chưa encode).
+ * - Laravel/PHP: tách connection string thành DB_* (best-effort) và GIỮ thêm DATABASE_URL.
+ */
+export function buildManagedDbEnvLines(projectType, url) {
+    const clean = (url || '').trim();
+    if (!clean) return '';
+
+    if (projectType && projectType.includes('Node.js')) {
+        return `DATABASE_URL="${clean}"`;
+    }
+
+    const p = parseDatabaseUrl(clean);
+    const lines = [];
+    if (p && p.host) {
+        const isPg = /postgres/i.test(p.scheme);
+        const conn = isPg ? 'pgsql' : (/mysql|maria/i.test(p.scheme) ? 'mysql' : (p.scheme || 'pgsql'));
+        const port = p.port || (isPg ? '5432' : '3306');
+        lines.push(`DB_CONNECTION=${conn}`);
+        lines.push(`DB_HOST=${p.host}`);
+        lines.push(`DB_PORT=${port}`);
+        lines.push(`DB_DATABASE=${p.dbName}`);
+        lines.push(`DB_USERNAME=${p.user}`);
+        lines.push(`DB_PASSWORD=${p.pass}`);
+    }
+    lines.push(`DATABASE_URL="${clean}"`);
+    return lines.join('\n');
+}
