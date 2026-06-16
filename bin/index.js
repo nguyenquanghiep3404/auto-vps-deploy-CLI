@@ -2,7 +2,7 @@
 
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import { generateSSHKeys, installPublicKeyToVPS, scanUsedPorts, findAvailablePorts } from '../src/utils/ssh.js';
+import { generateSSHKeys, installPublicKeyToVPS, scanUsedPorts, scanDomainPorts, findAvailablePorts } from '../src/utils/ssh.js';
 import { checkGithubAuth, loginGithub, setGithubSecret, installGithubCli } from '../src/github/secrets.js';
 import { setupWebserverOnVPS, setupDatabaseOnVPS, ensureNodeRuntimeOnVPS } from '../src/vps/setup.js';
 import { generateWorkflowFile } from '../src/templates/workflows.js';
@@ -20,7 +20,7 @@ import {
     stripAppPort
 } from '../src/utils/env.js';
 import { detectPackageManager, detectWorkspace, hasBuildScript, scanHardcodedPorts, scanLocalhostUrls, findLocalhostUrls } from '../src/utils/project.js';
-import { detectProject } from '../src/utils/detect.js';
+import { detectProject, detectDatabase, detectNodeVersion, databaseLabel } from '../src/utils/detect.js';
 import { execa, execaCommand } from 'execa';
 import path from 'path';
 
@@ -56,7 +56,8 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
         isWorkspace: false,
         packageManager: 'npm',
         startScript: 'start',
-        hasBuild: false
+        hasBuild: false,
+        nodeVersion: null
     };
 
     const isNode = projectType.includes('Node.js');
@@ -160,28 +161,41 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
     if (isJs) {
         const buildCheckDir = extras.isWorkspace ? repoRoot : workDirAbs;
         extras.hasBuild = hasBuildScript(buildCheckDir);
+        // Tự nhận diện phiên bản Node (engines.node/.nvmrc) — ưu tiên thư mục phần, rồi gốc repo.
+        const nv = detectNodeVersion(workDirAbs) || detectNodeVersion(repoRoot);
+        extras.nodeVersion = nv;
+        if (nv) console.log(chalk.cyan(`   🔍 Tự phát hiện Node version: ${chalk.bold(nv)} (sẽ dùng cho runner & VPS).`));
     }
 
     // ---- Database (Node / Laravel / PHP thuần) ----
     if (isNode || isLaravel || isPurePhp) {
+        // Tự nhận diện DB từ source (Prisma schema / driver / .env...) -> điền sẵn câu trả lời,
+        // người dùng vẫn sửa tay được. Nếu phát hiện DB -> mặc định "Có".
+        const detectedDb = detectDatabase(workDirAbs);
+        const dbHint = detectedDb && detectedDb.engine ? detectedDb : null;
+        if (dbHint) {
+            console.log(chalk.cyan(`   🔍 Tự phát hiện Database: ${chalk.bold(databaseLabel(dbHint))} (từ ${dbHint.source}).`));
+        }
+        const baseMsg = isNode
+            // App Node (vd Next.js) ĐƯỢC hỏi vì nó có thể truy vấn DB trực tiếp (API routes,
+            // server components/actions). Nếu "frontend" chỉ gọi API của backend thì chọn No.
+            ? 'Phần này có kết nối TRỰC TIẾP tới Database không? (Next.js/Express có thể truy vấn DB trực tiếp. Nếu frontend chỉ gọi API của backend → chọn No)'
+            : 'Phần này có cần Database không? (Tool sẽ tự cài DB server, tạo database + user và nạp biến kết nối vào .env)';
         const { needsDb } = await inquirer.prompt([{
             type: 'confirm',
             name: 'needsDb',
-            // App Node (vd Next.js) ĐƯỢC hỏi vì nó có thể truy vấn DB trực tiếp (API routes,
-            // server components/actions). Nếu "frontend" của bạn chỉ gọi API của backend thì
-            // KHÔNG cần DB ở đây — cứ chọn No (mặc định). DB sẽ khai báo ở phần backend.
-            message: isNode
-                ? 'Phần này có kết nối TRỰC TIẾP tới Database không? (Next.js/Express có thể truy vấn DB trực tiếp. Nếu frontend chỉ gọi API của backend → chọn No)'
-                : 'Phần này có cần Database không? (Tool sẽ tự cài DB server, tạo database + user và nạp biến kết nối vào .env)',
-            default: false
+            message: baseMsg,
+            default: !!dbHint
         }]);
         if (needsDb) {
             const SUPABASE_CHOICE = 'Supabase (PostgreSQL Cloud - bạn tự quản lý)';
+            const engineToChoice = { postgresql: 'PostgreSQL', mysql: 'MySQL', mongodb: 'MongoDB', supabase: SUPABASE_CHOICE };
             const { engine } = await inquirer.prompt([{
                 type: 'rawlist',
                 name: 'engine',
                 message: 'Chọn loại Database:',
-                choices: ['MySQL', 'PostgreSQL', 'MongoDB', SUPABASE_CHOICE]
+                choices: ['MySQL', 'PostgreSQL', 'MongoDB', SUPABASE_CHOICE],
+                default: (dbHint && engineToChoice[dbHint.engine]) || undefined
             }]);
 
             if (engine === SUPABASE_CHOICE) {
@@ -265,6 +279,22 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
     }
 
     return extras;
+}
+
+/**
+ * Gán cổng cho một app Node. Nếu domain đã có cổng từ lần deploy trước (đọc từ cấu hình Nginx)
+ * thì TÁI SỬ DỤNG cổng đó (ổn định, không "trôi"); nếu chưa thì tìm cổng trống tiếp theo.
+ * Luôn cập nhật allUsedPorts để các phần sau không gán trùng.
+ */
+function assignPort(domain, allUsedPorts, existingDomainPorts) {
+    const existing = existingDomainPorts[domain];
+    if (existing) {
+        if (!allUsedPorts.includes(existing)) allUsedPorts.push(existing);
+        return { port: existing, reused: true };
+    }
+    const [port] = findAvailablePorts(allUsedPorts, 1);
+    allUsedPorts.push(port);
+    return { port, reused: false };
 }
 
 async function main() {
@@ -395,6 +425,7 @@ async function main() {
             p.buildDir ? `build: ${p.buildDir}` : null,
             p.startScript && p.startScript !== 'start' ? `script: ${p.startScript}` : null,
             p.usePrisma ? 'Prisma' : null,
+            p.database ? `DB: ${databaseLabel(p.database)}` : null,
             p.phpVersion ? `PHP ${p.phpVersion}` : null
         ].filter(Boolean).join(', ');
         console.log(chalk.white(`  • ${chalk.bold(p.name)} (${p.workingDir}): ${type}${extra ? chalk.gray(' — ' + extra) : ''}`));
@@ -417,12 +448,18 @@ async function main() {
     // ========================================
     console.log(chalk.gray('🔍 Đang quét các cổng (port) đã sử dụng trên VPS...'));
     const usedPortsOnVPS = await scanUsedPorts(vpsHost, vpsUser, vpsPassword);
+    // Map { domain: port } từ cấu hình Nginx cũ -> tái sử dụng cổng ổn định khi deploy lại.
+    const existingDomainPorts = await scanDomainPorts(vpsHost, vpsUser, vpsPassword);
     // Mảng theo dõi tất cả port đã gán trong phiên này
     const allUsedPorts = [...usedPortsOnVPS];
     if (usedPortsOnVPS.length > 0) {
         console.log(chalk.gray(`   Các cổng đã bị chiếm trên VPS: ${usedPortsOnVPS.join(', ')}`));
     } else {
         console.log(chalk.gray('   Không có cổng nào trong dãy 3000-3999 đang bị chiếm.'));
+    }
+    const reusableCount = Object.keys(existingDomainPorts).length;
+    if (reusableCount > 0) {
+        console.log(chalk.gray(`   Phát hiện ${reusableCount} domain đã có cổng từ lần deploy trước (sẽ tái sử dụng).`));
     }
 
     // ========================================
@@ -471,13 +508,14 @@ async function main() {
             }
         ]);
 
-        // Tự động gán port cho dự án Node.js
+        // Tự động gán port cho dự án Node.js (tái sử dụng cổng cũ của domain nếu có).
         let autoPort = undefined;
         if (singleAnswers.projectType.includes('Node.js')) {
-            const [port] = findAvailablePorts(allUsedPorts, 1);
+            const { port, reused } = assignPort(singleAnswers.domain, allUsedPorts, existingDomainPorts);
             autoPort = port;
-            allUsedPorts.push(port);
-            console.log(chalk.green(`✅ Đã tự động gán cổng: ${port}`));
+            console.log(chalk.green(reused
+                ? `✅ Tái sử dụng cổng cũ cho ${singleAnswers.domain}: ${port}`
+                : `✅ Đã tự động gán cổng: ${port}`));
         }
 
         // Các cấu hình nâng cao: .env, database, php version, package manager...
@@ -505,7 +543,8 @@ async function main() {
             isWorkspace: extras.isWorkspace,
             packageManager: extras.packageManager,
             startScript: extras.startScript,
-            hasBuild: extras.hasBuild
+            hasBuild: extras.hasBuild,
+            nodeVersion: extras.nodeVersion
         });
 
     } else {
@@ -594,13 +633,14 @@ async function main() {
                 }
             ]);
 
-            // Tự động gán port cho dự án Node.js
+            // Tự động gán port cho dự án Node.js (tái sử dụng cổng cũ của domain nếu có).
             let autoPort = undefined;
             if (partAnswers.projectType.includes('Node.js')) {
-                const [port] = findAvailablePorts(allUsedPorts, 1);
+                const { port, reused } = assignPort(partAnswers.domain, allUsedPorts, existingDomainPorts);
                 autoPort = port;
-                allUsedPorts.push(port);
-                console.log(chalk.green(`   ✅ Đã tự động gán cổng cho ${partAnswers.partName}: ${port}`));
+                console.log(chalk.green(reused
+                    ? `   ✅ Tái sử dụng cổng cũ cho ${partAnswers.partName} (${partAnswers.domain}): ${port}`
+                    : `   ✅ Đã tự động gán cổng cho ${partAnswers.partName}: ${port}`));
             }
 
             // Đường dẫn .env mặc định dựa theo thư mục mã nguồn của phần
@@ -631,7 +671,8 @@ async function main() {
                 isWorkspace: extras.isWorkspace,
                 packageManager: extras.packageManager,
                 startScript: extras.startScript,
-                hasBuild: extras.hasBuild
+                hasBuild: extras.hasBuild,
+                nodeVersion: extras.nodeVersion
             });
         }
 
@@ -692,7 +733,12 @@ async function main() {
         if (nodeParts.length > 0) {
             console.log(chalk.blue('\n▶️  Bước 1.6: Cài đặt Node.js + PM2 (+ Corepack) cho ứng dụng Node...'));
             const needCorepack = nodeParts.some(p => p.packageManager === 'pnpm' || p.packageManager === 'yarn');
-            await ensureNodeRuntimeOnVPS(vpsHost, vpsUser, vpsPassword, { needCorepack });
+            // Cài Node theo phiên bản CAO NHẤT mà các phần yêu cầu (1 Node dùng chung trên VPS).
+            const nodeVersion = nodeParts
+                .map(p => parseInt(p.nodeVersion, 10))
+                .filter(Number.isInteger)
+                .reduce((max, v) => Math.max(max, v), 0) || undefined;
+            await ensureNodeRuntimeOnVPS(vpsHost, vpsUser, vpsPassword, { needCorepack, nodeVersion });
             console.log(chalk.green('✅ Xong Bước 1.6.'));
         }
 
@@ -769,7 +815,8 @@ async function main() {
                 phpVersion: part.phpVersion,
                 packageManager: part.packageManager,
                 startScript: part.startScript,
-                hasBuild: part.hasBuild
+                hasBuild: part.hasBuild,
+                nodeVersion: part.nodeVersion
             });
         }
         console.log(chalk.green('✅ Xong Bước 4.'));

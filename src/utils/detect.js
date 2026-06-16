@@ -23,6 +23,21 @@ const SPA_DEPS = [
     'svelte', '@vue/cli-service', 'parcel', 'preact'
 ];
 
+// Driver/dependency Node -> loại Database (chỉ map tới các engine tool hỗ trợ).
+// Thứ tự QUAN TRỌNG: cái cụ thể/khả năng cao đặt trước (match đầu tiên thắng).
+const DB_DRIVER_DEPS = [
+    ['pg', 'postgresql'], ['pg-promise', 'postgresql'], ['postgres', 'postgresql'],
+    ['@vercel/postgres', 'postgresql'], ['@neondatabase/serverless', 'postgresql'],
+    ['mysql2', 'mysql'], ['mysql', 'mysql'],
+    ['mongodb', 'mongodb'], ['mongoose', 'mongodb']
+];
+
+// provider trong prisma/schema.prisma -> engine tool hỗ trợ (bỏ qua sqlite/sqlserver: không cần DB server).
+const PRISMA_PROVIDER_MAP = {
+    postgresql: 'postgresql', postgres: 'postgresql', cockroachdb: 'postgresql',
+    mysql: 'mysql', mongodb: 'mongodb'
+};
+
 function safeExists(p) {
     try { return fs.existsSync(p); } catch (e) { return false; }
 }
@@ -103,6 +118,32 @@ export function detectBuildDir(dirAbs) {
     return 'dist';
 }
 
+/**
+ * Đoán phiên bản Node (major) cần dùng: ưu tiên `.nvmrc`, rồi `engines.node` trong package.json.
+ * Lấy số major đầu tiên tìm thấy (vd ">=20" -> "20", "18.17.0" -> "18"). Trả về chuỗi major
+ * hoặc null nếu không khai báo (khi đó caller dùng mặc định). Bỏ qua giá trị vô lý (<12 hoặc >40).
+ */
+export function detectNodeVersion(dirAbs) {
+    const pick = (raw) => {
+        const m = String(raw).match(/(\d{2})/);
+        if (!m) return null;
+        const major = parseInt(m[1], 10);
+        return (major >= 12 && major <= 40) ? String(major) : null;
+    };
+    try {
+        const nvmrc = fs.readFileSync(path.join(dirAbs, '.nvmrc'), 'utf8').trim();
+        const v = pick(nvmrc);
+        if (v) return v;
+    } catch (e) { /* không có .nvmrc */ }
+    const pkg = readPkg(dirAbs);
+    const eng = pkg && pkg.engines && pkg.engines.node;
+    if (eng) {
+        const v = pick(eng);
+        if (v) return v;
+    }
+    return null;
+}
+
 /** Đoán start script production: NestJS thường có start:prod, nếu không thì start. */
 export function detectStartScript(dirAbs) {
     const pkg = readPkg(dirAbs);
@@ -116,6 +157,87 @@ export function detectPrisma(dirAbs) {
     if (safeExists(path.join(dirAbs, 'prisma', 'schema.prisma'))) return true;
     const pkg = readPkg(dirAbs);
     return !!(pkg && (pkg._deps['prisma'] || pkg._deps['@prisma/client']));
+}
+
+/** Đọc nội dung file đầu tiên TỒN TẠI trong danh sách (theo thứ tự ưu tiên). Trả về null nếu không có. */
+function readFirstFile(dirAbs, files) {
+    for (const f of files) {
+        try { return fs.readFileSync(path.join(dirAbs, f), 'utf8'); } catch (e) { /* bỏ qua */ }
+    }
+    return null;
+}
+
+/**
+ * Đoán engine DB từ một chuỗi connection string (vd nội dung .env có DATABASE_URL).
+ * Trả về 'postgresql' | 'mysql' | 'mongodb' | null. Ưu tiên dòng DATABASE_URL nếu có.
+ */
+export function detectDatabaseUrlEngine(content) {
+    if (!content) return null;
+    const m = content.match(/^[ \t]*DATABASE_URL[ \t]*=[ \t]*["']?([^\s"']+)/im);
+    const target = m ? m[1] : content;
+    if (/\bpostgres(?:ql)?:\/\//i.test(target)) return 'postgresql';
+    if (/\bmysql:\/\//i.test(target)) return 'mysql';
+    if (/\bmongodb(?:\+srv)?:\/\//i.test(target)) return 'mongodb';
+    return null;
+}
+
+/**
+ * Nhận diện loại Database dự án đang dùng — chỉ là GỢI Ý để điền sẵn câu hỏi (người dùng vẫn sửa được).
+ * Thứ tự ưu tiên (chính xác dần xuống): Prisma schema → driver trong dependencies →
+ * biến trong .env/.env.example → (Laravel) DB_CONNECTION.
+ * Trả về { engine, managed, source } hoặc null.
+ *   - managed=true nghĩa là DB cloud (Supabase) — tool KHÔNG cài trên VPS.
+ */
+export function detectDatabase(dirAbs) {
+    // 1) Prisma datasource provider — chuẩn xác nhất cho Node.
+    const schema = readFirstFile(dirAbs, ['prisma/schema.prisma']);
+    if (schema) {
+        const m = schema.match(/datasource\s+\w+\s*\{[^}]*?provider\s*=\s*["']([a-z]+)["']/is)
+            || schema.match(/provider\s*=\s*["']([a-z]+)["']/i);
+        if (m) {
+            const eng = PRISMA_PROVIDER_MAP[m[1].toLowerCase()];
+            if (eng) return { engine: eng, managed: false, source: 'prisma/schema.prisma' };
+        }
+    }
+
+    // 2) Driver / SDK trong dependencies.
+    const pkg = readPkg(dirAbs);
+    if (pkg) {
+        const deps = pkg._deps;
+        if (deps['@supabase/supabase-js']) {
+            return { engine: 'supabase', managed: true, source: 'dependency @supabase/supabase-js' };
+        }
+        for (const [dep, eng] of DB_DRIVER_DEPS) {
+            if (Object.prototype.hasOwnProperty.call(deps, dep)) {
+                return { engine: eng, managed: false, source: `dependency ${dep}` };
+            }
+        }
+    }
+
+    // 3) .env / .env.example — Supabase rõ ràng, rồi tới DATABASE_URL, rồi DB_CONNECTION (Laravel).
+    const env = readFirstFile(dirAbs, ['.env', '.env.example', '.env.local', '.env.sample']);
+    if (env) {
+        if (/SUPABASE_URL|supabase\.co|pooler\.supabase\.com/i.test(env)) {
+            return { engine: 'supabase', managed: true, source: '.env (Supabase)' };
+        }
+        const urlEng = detectDatabaseUrlEngine(env);
+        if (urlEng) return { engine: urlEng, managed: false, source: '.env DATABASE_URL' };
+        const m = env.match(/^[ \t]*DB_CONNECTION[ \t]*=[ \t]*["']?([a-z]+)/im);
+        if (m) {
+            const map = { pgsql: 'postgresql', postgres: 'postgresql', mysql: 'mysql', mariadb: 'mysql', mongodb: 'mongodb' };
+            const eng = map[m[1].toLowerCase()];
+            if (eng) return { engine: eng, managed: false, source: '.env DB_CONNECTION' };
+        }
+    }
+
+    return null;
+}
+
+/** Nhãn hiển thị thân thiện cho engine DB đã nhận diện. */
+export function databaseLabel(db) {
+    if (!db || !db.engine) return '';
+    const map = { postgresql: 'PostgreSQL', mysql: 'MySQL', mongodb: 'MongoDB', supabase: 'Supabase' };
+    return map[db.engine] || db.engine;
 }
 
 /** Đọc composer.json require.php -> đề xuất phiên bản X.Y (vd ">=8.1" -> "8.1"). Trả về null nếu không có. */
@@ -192,9 +314,11 @@ function enrichPart(name, workingDir, dirAbs) {
     if (projectType === TYPE.NODE) {
         part.startScript = detectStartScript(dirAbs);
         part.usePrisma = detectPrisma(dirAbs);
+        part.database = detectDatabase(dirAbs);
     }
     if (projectType === TYPE.LARAVEL || projectType === TYPE.PHP) {
         part.phpVersion = detectPhpVersion(dirAbs);
+        part.database = detectDatabase(dirAbs);
     }
     return part;
 }

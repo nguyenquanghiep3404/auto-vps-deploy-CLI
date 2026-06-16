@@ -10,6 +10,9 @@ The tool scans your repo **before asking questions** to pre-fill the project str
 - **Single / Monorepo structure**: Detected from `package.json` `workspaces`, `pnpm-workspace.yaml`, `turbo.json`, or common subfolders (`frontend`, `backend`, `apps/*`, `packages/*`...). For a Monorepo it **lists every part** with its name + directory.
 - **Project type (backend/frontend)**: Distinguishes **Node.js (PM2)** vs **React/Vite/Vue (SPA)** from the `package.json` dependencies (`express`/`next`/`nest` → PM2 server; `vite`/`react`/`vue` with no server → static SPA); also detects **Laravel** (`artisan` + `laravel/framework`), **plain PHP** (`composer.json`/`.php` files), and **Static** (`index.html` only).
 - **Extra details**: Also guesses `buildDir` (reads `outDir` from `vite.config`), `start:prod` for NestJS, whether **Prisma** is used, and the **PHP version** (from `composer.json` `require.php`).
+- **Database engine 🆕**: Auto-detected in priority order: `prisma/schema.prisma` (`provider`) → driver in `package.json` (`pg`/`mysql2`/`mongoose`/`@supabase/supabase-js`...) → `DATABASE_URL`/`DB_CONNECTION` in `.env`. If found, the "does this part need a Database?" question **defaults to Yes** and **pre-selects the right engine** (MySQL/PostgreSQL/MongoDB/Supabase).
+- **Node version 🆕**: Reads `engines.node` (`package.json`) or `.nvmrc` to use the right Node version on both the runner and the VPS, instead of hardcoding Node 22 (with a Node 20 LTS floor on the VPS).
+- **Stable port on re-deploy 🆕**: Re-running for the same domain reuses the port already assigned in the old Nginx config, instead of drifting to a new port and orphaning the old PM2 process.
 
 > Everything is only a **pre-filled suggestion** — you always keep full control to change it at every step. A wrong guess is harmless.
 
