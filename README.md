@@ -154,6 +154,15 @@ How the `.env` is used per project type:
 
 > ⚠️ **MongoDB note**: A local MongoDB has no auth by default. If you use Prisma + MongoDB you must additionally configure a **replica set** (Prisma requires it). MySQL and PostgreSQL work out of the box.
 
+### CORS for Monorepo (avoid 403 when frontend calls backend) 🆕
+When the frontend (e.g. `https://demo.test8.io.vn`) calls the backend API on a different origin, the **browser** enforces CORS — the backend must **whitelist the frontend origin**, otherwise you get **403 "blocked by CORS policy"**.
+
+Since the CORS variable name is **not a standard** (backends use `CORS_ORIGINS`, `ALLOWED_ORIGINS`, `FRONTEND_URL`...), the tool does **not** hardcode it. Instead it **auto-detects** the real CORS variable in the backend's `.env`/`.env.example` and:
+- **Found** → suggests setting that exact key to `https://<frontend-domain>` (replacing any `localhost` value, no duplicate line). You confirm or edit.
+- **Not found** → it does **not** guess; it just **warns** with the origin to whitelist, so you add it in your backend code/config (e.g. `cors()` / `config/cors.php`).
+
+> 💡 CORS only matters for **multi-part Monorepos** (frontend & backend on different origins). A single-origin app doesn't need it.
+
 ## Prisma in Production — `migrate deploy` + `db seed` (manual tweak)
 By default, the generated Node workflow uses **`prisma db push --accept-data-loss`**. This force-syncs the database to your schema with **no migration history** and **can delete data** when a schema change requires dropping a column/table. It's great for prototyping, but **risky for a live app with real data** (orders, customers...), and it does **not** run seeds.
 

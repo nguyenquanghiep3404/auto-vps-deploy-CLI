@@ -184,3 +184,44 @@ export function buildManagedDbEnvLines(projectType, url) {
     lines.push(`DATABASE_URL="${clean}"`);
     return lines.join('\n');
 }
+
+/**
+ * Dò các biến môi trường liên quan CORS/origin trong nội dung .env (vd CORS_ORIGINS,
+ * CORS_ORIGIN, ALLOWED_ORIGINS, FRONTEND_URL, CLIENT_URL...). KHÔNG giả định tên biến cố định —
+ * chỉ trả về tên biến mà dự án THỰC SỰ khai báo, để tool đặt đúng tên đó (tránh đặt biến "chết").
+ * Trả về mảng { key, value } (value đã bỏ nháy bao quanh), không trùng key.
+ */
+export function detectCorsKeys(content) {
+    if (!content) return [];
+    const out = [];
+    const seen = new Set();
+    const re = /^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(.*)$/gm;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        const key = m[1];
+        // Khớp các key về ORIGIN (CORS_ORIGINS, ALLOWED_ORIGINS...) hoặc URL frontend.
+        // Cố ý KHÔNG khớp CORS_ALLOWED_HEADERS / CORS_CREDENTIALS (không phải origin).
+        if (!/(ORIGIN|FRONTEND_URL|CLIENT_URL)/i.test(key)) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const value = (m[2] || '').trim().replace(/^["']|["']$/g, '');
+        out.push({ key, value });
+    }
+    return out;
+}
+
+/**
+ * Đặt (hoặc thay thế) một biến trong nội dung .env. Nếu key đã tồn tại -> thay dòng đó
+ * (vd sửa CORS_ORIGINS=localhost -> domain thật, không tạo dòng trùng). Nếu chưa có -> thêm vào cuối.
+ */
+export function upsertEnvKey(content, key, value) {
+    const safeKey = String(key).replace(/[^A-Za-z0-9_]/g, '');
+    if (!safeKey) return content;
+    const line = `${safeKey}=${value}`;
+    const re = new RegExp(`^[ \\t]*${safeKey}[ \\t]*=.*$`, 'm');
+    if (content && re.test(content)) {
+        return content.replace(re, line);
+    }
+    const base = content ? content.replace(/\s*$/, '') : '';
+    return base ? `${base}\n${line}\n` : `${line}\n`;
+}

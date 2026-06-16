@@ -154,6 +154,15 @@ Cách `.env` được dùng theo từng loại dự án:
 
 > ⚠️ **Lưu ý MongoDB**: MongoDB cài local mặc định không bật xác thực. Nếu dùng Prisma + MongoDB, bạn phải cấu hình thêm **Replica Set** (Prisma bắt buộc). MySQL và PostgreSQL thì chạy được ngay.
 
+### CORS cho Monorepo (tránh 403 khi frontend gọi backend) 🆕
+Khi frontend (vd `https://demo.test8.io.vn`) gọi API sang backend ở origin khác, **trình duyệt** áp dụng CORS — backend phải **whitelist đúng origin frontend**, nếu không sẽ bị **403 "blocked by CORS policy"**.
+
+Vì tên biến CORS **không phải chuẩn** (mỗi backend đặt khác nhau: `CORS_ORIGINS`, `ALLOWED_ORIGINS`, `FRONTEND_URL`...), tool **không đặt cứng** mà **tự dò** tên biến CORS thật trong `.env`/`.env.example` của phần backend, rồi:
+- **Dò thấy** → gợi ý đặt **đúng tên đó** = `https://<domain-frontend>` (tự thay giá trị `localhost` → domain thật, không tạo dòng trùng). Bạn xác nhận hoặc sửa.
+- **Không dò thấy** → tool **không đoán bừa**, chỉ **cảnh báo** kèm origin cần whitelist để bạn tự thêm trong code/config (vd `cors()` / `config/cors.php`).
+
+> 💡 CORS chỉ phát sinh ở **Monorepo nhiều phần** (frontend & backend khác origin). App đơn 1 origin thì không cần.
+
 ## Prisma cho Production — `migrate deploy` + `db seed` (chỉnh tay)
 Mặc định, workflow Node do tool sinh ra dùng **`prisma db push --accept-data-loss`**. Lệnh này ép DB giống schema, **không có lịch sử migration** và **có thể xoá dữ liệu** khi thay đổi schema cần bỏ cột/bảng. Rất hợp để làm thử, nhưng **nguy hiểm với app thật đang có dữ liệu** (đơn hàng, khách hàng...), và **không chạy seed**.
 

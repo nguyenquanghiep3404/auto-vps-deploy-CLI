@@ -14,6 +14,8 @@ import {
     buildLaravelDbEnv,
     buildManagedDbEnvLines,
     parseDatabaseUrl,
+    detectCorsKeys,
+    upsertEnvKey,
     envHasKey,
     mergeEnvContent,
     stripAppPort
@@ -144,6 +146,42 @@ test('buildManagedDbEnvLines: Laravel tách DB_* + giữ thêm DATABASE_URL', ()
     assert.match(out, /DB_USERNAME=supauser/);
     assert.match(out, /DB_PASSWORD=supapass/);
     assert.match(out, /DATABASE_URL="postgresql:\/\/supauser/);
+});
+
+test('detectCorsKeys: dò đúng biến CORS/origin, bỏ qua key không liên quan', () => {
+    const env = [
+        'NODE_ENV=production',
+        'CORS_ORIGINS=http://localhost:3000',
+        'CORS_ALLOWED_HEADERS=Content-Type',   // KHÔNG phải origin -> bỏ qua
+        'FRONTEND_URL="https://app.example.com"',
+        'DB_HOST=127.0.0.1'
+    ].join('\n');
+    const keys = detectCorsKeys(env);
+    const names = keys.map(k => k.key);
+    assert.deepEqual(names.sort(), ['CORS_ORIGINS', 'FRONTEND_URL']);
+    assert.equal(keys.find(k => k.key === 'CORS_ORIGINS').value, 'http://localhost:3000');
+    // value đã bỏ nháy bao quanh
+    assert.equal(keys.find(k => k.key === 'FRONTEND_URL').value, 'https://app.example.com');
+    assert.deepEqual(detectCorsKeys(''), []);
+    assert.deepEqual(detectCorsKeys('FOO=1\nBAR=2'), []);
+});
+
+test('upsertEnvKey: thay dòng cũ (localhost) thay vì tạo dòng trùng', () => {
+    const env = 'NODE_ENV=production\nCORS_ORIGINS=http://localhost:3000\nFOO=bar';
+    const out = upsertEnvKey(env, 'CORS_ORIGINS', 'https://demo.test8.io.vn');
+    assert.match(out, /CORS_ORIGINS=https:\/\/demo\.test8\.io\.vn/);
+    assert.ok(!out.includes('localhost:3000'), 'giá trị localhost cũ phải bị thay');
+    // không tạo dòng trùng
+    assert.equal((out.match(/^CORS_ORIGINS=/gm) || []).length, 1);
+    assert.match(out, /NODE_ENV=production/);
+    assert.match(out, /FOO=bar/);
+});
+
+test('upsertEnvKey: thêm mới khi chưa có (kể cả .env rỗng/null)', () => {
+    assert.equal(upsertEnvKey('', 'CORS_ORIGINS', 'https://x.com'), 'CORS_ORIGINS=https://x.com\n');
+    assert.equal(upsertEnvKey(null, 'CORS_ORIGINS', 'https://x.com'), 'CORS_ORIGINS=https://x.com\n');
+    const out = upsertEnvKey('FOO=1', 'CORS_ORIGINS', 'https://x.com');
+    assert.match(out, /FOO=1\nCORS_ORIGINS=https:\/\/x\.com/);
 });
 
 test('stripAppPort: loại PORT của app nhưng GIỮ DB_PORT và biến khác', () => {
