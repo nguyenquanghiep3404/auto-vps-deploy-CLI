@@ -12,10 +12,15 @@ import {
     generateLaravelAppKey,
     buildPrismaDatabaseUrl,
     buildLaravelDbEnv,
+    buildManagedDbEnvLines,
+    parseDatabaseUrl,
     envHasKey,
     mergeEnvContent,
     stripAppPort
 } from '../src/utils/env.js';
+
+const NODE = 'Node.js (PM2 - Next.js, Express, NestJS...)';
+const LARAVEL = 'PHP (Laravel)';
 
 test('sanitizeSecretName: hợp lệ hoá tên secret', () => {
     assert.equal(sanitizeSecretName('part-1'), 'PART_1');
@@ -104,6 +109,41 @@ test('readEnvFile: đọc file tồn tại, trả null khi thiếu/không phải
     assert.equal(readEnvFile(dir), null); // là thư mục
     assert.equal(readEnvFile(''), null);
     fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('parseDatabaseUrl: tách connection string Supabase/Postgres', () => {
+    const p = parseDatabaseUrl('postgresql://postgres.abcd:secretPass@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres');
+    assert.equal(p.scheme, 'postgresql');
+    assert.equal(p.user, 'postgres.abcd');
+    assert.equal(p.pass, 'secretPass');
+    assert.equal(p.host, 'aws-0-ap-southeast-1.pooler.supabase.com');
+    assert.equal(p.port, '6543');
+    assert.equal(p.dbName, 'postgres');
+    // mật khẩu có ký tự đặc biệt đã URL-encode -> được decode lại đúng
+    assert.equal(parseDatabaseUrl('postgres://u:p%40ss%2F1@h:5432/db').pass, 'p@ss/1');
+    // chuỗi không hợp lệ -> null
+    assert.equal(parseDatabaseUrl('không-phải-url'), null);
+    assert.equal(parseDatabaseUrl(''), null);
+});
+
+test('buildManagedDbEnvLines: Node chỉ cần DATABASE_URL (giữ nguyên chuỗi)', () => {
+    const url = 'postgresql://postgres:p@ss@db.xyz.supabase.co:5432/postgres';
+    const out = buildManagedDbEnvLines(NODE, url);
+    assert.equal(out, `DATABASE_URL="${url}"`);
+    // không có chuỗi -> rỗng
+    assert.equal(buildManagedDbEnvLines(NODE, '   '), '');
+});
+
+test('buildManagedDbEnvLines: Laravel tách DB_* + giữ thêm DATABASE_URL', () => {
+    const url = 'postgresql://supauser:supapass@db.xyz.supabase.co:5432/postgres';
+    const out = buildManagedDbEnvLines(LARAVEL, url);
+    assert.match(out, /DB_CONNECTION=pgsql/);
+    assert.match(out, /DB_HOST=db\.xyz\.supabase\.co/);
+    assert.match(out, /DB_PORT=5432/);
+    assert.match(out, /DB_DATABASE=postgres/);
+    assert.match(out, /DB_USERNAME=supauser/);
+    assert.match(out, /DB_PASSWORD=supapass/);
+    assert.match(out, /DATABASE_URL="postgresql:\/\/supauser/);
 });
 
 test('stripAppPort: loại PORT của app nhưng GIỮ DB_PORT và biến khác', () => {

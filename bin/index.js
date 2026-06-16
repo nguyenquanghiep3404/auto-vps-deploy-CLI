@@ -14,6 +14,7 @@ import {
     generateLaravelAppKey,
     buildPrismaDatabaseUrl,
     buildLaravelDbEnv,
+    buildManagedDbEnvLines,
     envHasKey,
     mergeEnvContent,
     stripAppPort
@@ -166,39 +167,70 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
         const { needsDb } = await inquirer.prompt([{
             type: 'confirm',
             name: 'needsDb',
-            message: 'Phần này có cần Database không? (Tool sẽ tự cài DB server, tạo database + user và nạp biến kết nối vào .env)',
+            // App Node (vd Next.js) ĐƯỢC hỏi vì nó có thể truy vấn DB trực tiếp (API routes,
+            // server components/actions). Nếu "frontend" của bạn chỉ gọi API của backend thì
+            // KHÔNG cần DB ở đây — cứ chọn No (mặc định). DB sẽ khai báo ở phần backend.
+            message: isNode
+                ? 'Phần này có kết nối TRỰC TIẾP tới Database không? (Next.js/Express có thể truy vấn DB trực tiếp. Nếu frontend chỉ gọi API của backend → chọn No)'
+                : 'Phần này có cần Database không? (Tool sẽ tự cài DB server, tạo database + user và nạp biến kết nối vào .env)',
             default: false
         }]);
         if (needsDb) {
-            const baseSlug = slugify(partName);
-            const dbAnswers = await inquirer.prompt([
-                {
-                    type: 'rawlist',
-                    name: 'engine',
-                    message: 'Chọn loại Database:',
-                    choices: ['MySQL', 'PostgreSQL', 'MongoDB']
-                },
-                {
+            const SUPABASE_CHOICE = 'Supabase (PostgreSQL Cloud - bạn tự quản lý)';
+            const { engine } = await inquirer.prompt([{
+                type: 'rawlist',
+                name: 'engine',
+                message: 'Chọn loại Database:',
+                choices: ['MySQL', 'PostgreSQL', 'MongoDB', SUPABASE_CHOICE]
+            }]);
+
+            if (engine === SUPABASE_CHOICE) {
+                // Supabase là DB Postgres trên cloud -> KHÔNG cài DB trên VPS, KHÔNG sinh mật khẩu.
+                // Chỉ cần connection string của người dùng để nạp vào .env (Secret).
+                const { connectionString } = await inquirer.prompt([{
                     type: 'input',
-                    name: 'dbName',
-                    message: 'Tên Database:',
-                    default: `${baseSlug}_db`,
-                    validate: input => /^[A-Za-z_][A-Za-z0-9_]*$/.test(input.trim()) ? true : 'Chỉ dùng chữ cái, số, gạch dưới; không bắt đầu bằng số.'
-                },
-                {
-                    type: 'input',
-                    name: 'dbUser',
-                    message: 'Tên user của Database:',
-                    default: `${baseSlug}_user`,
-                    validate: input => /^[A-Za-z_][A-Za-z0-9_]*$/.test(input.trim()) ? true : 'Chỉ dùng chữ cái, số, gạch dưới; không bắt đầu bằng số.'
-                }
-            ]);
-            const engineMap = { 'MySQL': 'mysql', 'PostgreSQL': 'postgresql', 'MongoDB': 'mongodb' };
-            extras.database = {
-                engine: engineMap[dbAnswers.engine],
-                dbName: dbAnswers.dbName.trim(),
-                dbUser: dbAnswers.dbUser.trim()
-            };
+                    name: 'connectionString',
+                    message: 'Dán Connection String của Supabase (Project Settings → Database → Connection string → URI):',
+                    validate: input => {
+                        const v = (input || '').trim();
+                        if (!v) return 'Không được để trống';
+                        if (!/^[a-z][a-z0-9+.-]*:\/\/.+@.+\/.+/i.test(v)) {
+                            return 'Không hợp lệ. Dạng: postgresql://user:pass@host:5432/postgres';
+                        }
+                        return true;
+                    }
+                }]);
+                extras.database = {
+                    engine: 'supabase',
+                    managed: true,
+                    connectionString: connectionString.trim()
+                };
+                console.log(chalk.green('   ✅ Đã ghi nhận Supabase. Tool sẽ KHÔNG cài DB trên VPS; app kết nối thẳng tới Supabase qua connection string.'));
+            } else {
+                const baseSlug = slugify(partName);
+                const dbAnswers = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'dbName',
+                        message: 'Tên Database:',
+                        default: `${baseSlug}_db`,
+                        validate: input => /^[A-Za-z_][A-Za-z0-9_]*$/.test(input.trim()) ? true : 'Chỉ dùng chữ cái, số, gạch dưới; không bắt đầu bằng số.'
+                    },
+                    {
+                        type: 'input',
+                        name: 'dbUser',
+                        message: 'Tên user của Database:',
+                        default: `${baseSlug}_user`,
+                        validate: input => /^[A-Za-z_][A-Za-z0-9_]*$/.test(input.trim()) ? true : 'Chỉ dùng chữ cái, số, gạch dưới; không bắt đầu bằng số.'
+                    }
+                ]);
+                const engineMap = { 'MySQL': 'mysql', 'PostgreSQL': 'postgresql', 'MongoDB': 'mongodb' };
+                extras.database = {
+                    engine: engineMap[engine],
+                    dbName: dbAnswers.dbName.trim(),
+                    dbUser: dbAnswers.dbUser.trim()
+                };
+            }
         }
     }
 
@@ -511,7 +543,18 @@ async function main() {
                     type: 'input',
                     name: 'domain',
                     message: `Tên miền (Domain) cho phần này:`,
-                    validate: validateDomain
+                    // Mỗi phần PHẢI có domain/subdomain RIÊNG. Nếu 2 phần (vd frontend + backend)
+                    // dùng CHUNG domain, chúng sẽ ghi đè nhau ở: webroot /var/www/<domain>,
+                    // cấu hình Nginx, và TÊN ỨNG DỤNG PM2 (app-<domain>) -> xung đột, mất app.
+                    validate: input => {
+                        const base = validateDomain(input);
+                        if (base !== true) return base;
+                        const v = input.trim();
+                        if (parts.some(p => p.domain === v)) {
+                            return `Domain "${v}" đã dùng cho phần khác. Mỗi phần cần domain/subdomain riêng (vd: app.example.com cho frontend, api.example.com cho backend).`;
+                        }
+                        return true;
+                    }
                 },
                 {
                     type: 'rawlist',
@@ -597,7 +640,7 @@ async function main() {
         console.log(chalk.gray('─'.repeat(60)));
         parts.forEach((p, idx) => {
             const portInfo = p.port ? ` | Cổng: ${p.port}` : '';
-            const dbInfo = p.database ? ` | DB: ${p.database.engine}` : '';
+            const dbInfo = p.database ? ` | DB: ${p.database.managed ? 'Supabase' : p.database.engine}` : '';
             const wsInfo = p.isWorkspace ? ' | workspaces' : '';
             const isJs = p.projectType.includes('Node.js') || p.projectType === 'React/Vite/Vue (SPA)';
             const pmInfo = isJs ? ` | ${p.packageManager}` : '';
@@ -630,9 +673,11 @@ async function main() {
 
         // ---- Bước 1.5: Cài đặt Database server + tạo database/user cho các phần cần DB ----
         const partsWithDb = parts.filter(p => p.database);
-        if (partsWithDb.length > 0) {
+        // DB "managed" (vd Supabase) nằm trên cloud -> KHÔNG cài/tạo gì trên VPS, chỉ dùng connection string.
+        const partsToInstallDb = partsWithDb.filter(p => !p.database.managed);
+        if (partsToInstallDb.length > 0) {
             console.log(chalk.blue('\n▶️  Bước 1.5: Cài đặt Database server và khởi tạo database...'));
-            for (const part of partsWithDb) {
+            for (const part of partsToInstallDb) {
                 const { engine, dbName, dbUser } = part.database;
                 const dbPassword = generatePassword();
                 console.log(chalk.gray(`   → ${part.name}: cài ${engine}, tạo database "${dbName}" + user "${dbUser}"...`));
@@ -667,7 +712,11 @@ async function main() {
         for (const part of parts) {
             const generatedLines = [];
 
-            if (part.database && part.dbPassword) {
+            if (part.database && part.database.managed) {
+                // DB managed (Supabase...): nạp thẳng connection string người dùng cung cấp.
+                const managed = buildManagedDbEnvLines(part.projectType, part.database.connectionString);
+                if (managed) generatedLines.push(managed);
+            } else if (part.database && part.dbPassword) {
                 const { engine, dbName, dbUser } = part.database;
                 if (part.projectType.includes('Node.js')) {
                     generatedLines.push(`DATABASE_URL="${buildPrismaDatabaseUrl(engine, dbUser, part.dbPassword, dbName)}"`);
@@ -761,10 +810,14 @@ async function main() {
             console.log(chalk.yellow.bold('\n🔐 THÔNG TIN DATABASE (hãy lưu lại ở nơi an toàn!):'));
             console.log(chalk.gray('Chuỗi kết nối đã được lưu vào Github Secret và sẽ tự nạp vào .env khi deploy.'));
             for (const part of partsWithDb) {
-                const { engine, dbName, dbUser } = part.database;
-                console.log(chalk.white(`  • ${chalk.bold(part.name)} [${engine}] → DB: ${dbName} | User: ${dbUser} | Password: ${chalk.cyan(part.dbPassword)}`));
+                if (part.database.managed) {
+                    console.log(chalk.white(`  • ${chalk.bold(part.name)} [Supabase] → dùng connection string bạn cung cấp (đã lưu vào Github Secret ${part.envSecretName || 'ENV_FILE'}). Tool không tạo DB trên VPS.`));
+                } else {
+                    const { engine, dbName, dbUser } = part.database;
+                    console.log(chalk.white(`  • ${chalk.bold(part.name)} [${engine}] → DB: ${dbName} | User: ${dbUser} | Password: ${chalk.cyan(part.dbPassword)}`));
+                }
             }
-            console.log(chalk.gray('Mật khẩu này CHỈ hiển thị một lần duy nhất tại đây.'));
+            console.log(chalk.gray('Mật khẩu (DB tự cài) CHỈ hiển thị một lần duy nhất tại đây.'));
         }
 
     } catch (error) {

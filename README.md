@@ -18,6 +18,8 @@ This release closes the gaps that previously broke apps with a database (e.g. a 
 
 - **Automatic `.env` provisioning**: The tool reads your local `.env`, stores it in a Github Secret, and recreates it during the workflow run — at *build time* (so Vite `VITE_*` / CRA `REACT_APP_*` variables work) and on the *VPS* (so `DATABASE_URL`, secrets and API keys exist). No more "missing `.env`" 500 errors.
 - **Automatic Database server setup**: The tool can install **MySQL / PostgreSQL / MongoDB**, create the database + user, generate a strong password, and inject the connection string into the `.env` secret automatically. `prisma db push` and `artisan migrate` now have a real database to talk to.
+- **Supabase (PostgreSQL Cloud) support 🆕**: For a cloud DB, pick **Supabase** and paste the Connection String — the tool **installs nothing on the VPS**, it just injects `DATABASE_URL` (plus `DB_*` for Laravel) into the `.env` secret. The app on the VPS connects straight to Supabase.
+- **One domain per part 🆕**: In a Monorepo, the tool **blocks reusing the same domain** across parts — preventing frontend and backend from clobbering each other at the `/var/www/<domain>` webroot, the Nginx config, and the **PM2 app name** (`app-<domain>`).
 - **Vite / SPA build-time env**: For SPA projects, the `.env` is written **before** `npm run build`, so the bundle points at the correct API endpoint.
 - **Any package manager — npm / pnpm / yarn (auto-detected)**: The tool detects the package manager from the lockfile (`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`) and lets you confirm or override it. It then generates the correct install/build/runtime commands and enables **Corepack** for pnpm/yarn. **Turbo** monorepos work too (build runs at the repo root).
 - **Workspaces (monorepo) support**: If your sub-package has no own lockfile (lockfile only at the repo root), pick the *workspaces* option — install + build then run at the root and only the right package is deployed.
@@ -129,12 +131,17 @@ When you push code to Github, Github Actions will trigger both yml files indepen
 When you pick `Node.js`, `PHP (Laravel)` or `PHP (Vanilla)`, the tool asks a few extra questions:
 
 1. **PHP version** (for PHP projects): e.g. `8.1`, `8.2`, `8.3`. The tool installs that exact PHP-FPM on the VPS and points Nginx at the detected socket.
-2. **"Does this part need a Database?"** — If yes, choose the engine (`MySQL` / `PostgreSQL` / `MongoDB`) and the DB name + user. The tool will:
-   - Install the database server on the VPS (idempotent).
-   - Create the database and a dedicated user with an auto-generated strong password.
-   - Build the connection string and add it to the `.env` secret:
-     - Node.js → `DATABASE_URL="..."` (ready for Prisma).
-     - Laravel / Vanilla PHP → `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`.
+2. **"Does this part need a Database?"** — If yes, choose the engine (`MySQL` / `PostgreSQL` / `MongoDB` / `Supabase`).
+   - For **MySQL / PostgreSQL / MongoDB** (self-hosted on the VPS) — enter the DB name + user, and the tool will:
+     - Install the database server on the VPS (idempotent).
+     - Create the database and a dedicated user with an auto-generated strong password.
+     - Build the connection string and add it to the `.env` secret:
+       - Node.js → `DATABASE_URL="..."` (ready for Prisma).
+       - Laravel / Vanilla PHP → `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`.
+   - For **Supabase (PostgreSQL Cloud)** — the DB lives in the cloud, so the tool **installs nothing on the VPS**. Just **paste the Connection String** (Supabase → *Project Settings → Database → Connection string → URI*). The tool injects it into the `.env` secret:
+     - Node.js → `DATABASE_URL="..."` (kept verbatim).
+     - Laravel / Vanilla PHP → split into `DB_*` (best-effort) **plus** the original `DATABASE_URL`.
+   - 💡 *Frontend note*: if a part is Next.js (classified as `Node.js`), the tool still asks this because Next.js can query a DB directly (API routes / server components). If your **frontend only calls the backend API**, just answer **No** — declare the DB on the backend part only.
 3. **".env file path"** — Point it at your local `.env` (default `.env`, or `<part-dir>/.env` for monorepo). Its contents are stored as a Github Secret named `ENV_FILE` (single) or `ENV_FILE_<PARTNAME>` (monorepo) and re-created automatically by the workflow. Leave blank to skip.
 
 How the `.env` is used per project type:
