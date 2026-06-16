@@ -12,7 +12,10 @@ import {
     detectPrisma,
     detectPhpVersion,
     detectStructure,
-    detectProject
+    detectProject,
+    detectDatabase,
+    detectDatabaseUrlEngine,
+    databaseLabel
 } from '../src/utils/detect.js';
 
 let root;
@@ -163,6 +166,84 @@ test('detectPhpVersion: trích X.Y từ composer require.php', () => {
 test('detectPhpVersion: null khi không khai báo', () => {
     write(root, 'composer.json', JSON.stringify({ require: {} }));
     assert.equal(detectPhpVersion(root), null);
+});
+
+// ---------------- detectDatabase ----------------
+
+test('detectDatabaseUrlEngine: nhận diện scheme từ DATABASE_URL', () => {
+    assert.equal(detectDatabaseUrlEngine('DATABASE_URL=postgresql://u:p@h:5432/d'), 'postgresql');
+    assert.equal(detectDatabaseUrlEngine('DATABASE_URL="postgres://u:p@h/d"'), 'postgresql');
+    assert.equal(detectDatabaseUrlEngine('FOO=1\nDATABASE_URL=mysql://u:p@h:3306/d'), 'mysql');
+    assert.equal(detectDatabaseUrlEngine('DATABASE_URL=mongodb+srv://h/d'), 'mongodb');
+    assert.equal(detectDatabaseUrlEngine('NOTHING=1'), null);
+});
+
+test('detectDatabase: ưu tiên Prisma schema provider', () => {
+    mkdir(path.join(root, 'prisma'));
+    write(path.join(root, 'prisma'), 'schema.prisma',
+        'datasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n}');
+    // có cả driver mysql nhưng Prisma phải thắng
+    writePkg(root, { dependencies: { mysql2: '^3', '@prisma/client': '^5' } });
+    const db = detectDatabase(root);
+    assert.equal(db.engine, 'postgresql');
+    assert.match(db.source, /schema\.prisma/);
+});
+
+test('detectDatabase: theo driver trong dependencies', () => {
+    writePkg(root, { dependencies: { mysql2: '^3' } });
+    assert.equal(detectDatabase(root).engine, 'mysql');
+
+    writePkg(root, { dependencies: { mongoose: '^8' } });
+    assert.equal(detectDatabase(root).engine, 'mongodb');
+
+    writePkg(root, { dependencies: { pg: '^8' } });
+    assert.equal(detectDatabase(root).engine, 'postgresql');
+});
+
+test('detectDatabase: Supabase (managed) qua dependency hoặc .env', () => {
+    writePkg(root, { dependencies: { '@supabase/supabase-js': '^2' } });
+    const a = detectDatabase(root);
+    assert.equal(a.engine, 'supabase');
+    assert.equal(a.managed, true);
+
+    fs.rmSync(path.join(root, 'package.json'));
+    write(root, '.env', 'DATABASE_URL=postgresql://postgres:pw@db.abc.supabase.co:5432/postgres');
+    const b = detectDatabase(root);
+    assert.equal(b.engine, 'supabase');
+    assert.equal(b.managed, true);
+});
+
+test('detectDatabase: Laravel DB_CONNECTION trong .env', () => {
+    write(root, 'composer.json', JSON.stringify({ require: { 'laravel/framework': '^11' } }));
+    write(root, '.env', 'APP_ENV=production\nDB_CONNECTION=pgsql\nDB_HOST=127.0.0.1');
+    const db = detectDatabase(root);
+    assert.equal(db.engine, 'postgresql');
+    assert.match(db.source, /DB_CONNECTION/);
+});
+
+test('detectDatabase: null khi không có dấu hiệu DB', () => {
+    writePkg(root, { dependencies: { express: '^4' } });
+    assert.equal(detectDatabase(root), null);
+});
+
+test('databaseLabel: nhãn thân thiện', () => {
+    assert.equal(databaseLabel({ engine: 'postgresql' }), 'PostgreSQL');
+    assert.equal(databaseLabel({ engine: 'supabase' }), 'Supabase');
+    assert.equal(databaseLabel(null), '');
+});
+
+test('detectProject: tự gắn database cho phần Node & Laravel', () => {
+    const be = mkdir(path.join(root, 'backend'));
+    writePkg(be, { dependencies: { express: '^4', pg: '^8' } });
+    const fe = mkdir(path.join(root, 'frontend'));
+    writePkg(fe, { devDependencies: { vite: '^5' }, scripts: { build: 'vite build' } });
+
+    const res = detectProject(root);
+    const back = res.parts.find(p => p.name === 'backend');
+    const front = res.parts.find(p => p.name === 'frontend');
+    assert.equal(back.database.engine, 'postgresql');
+    // SPA frontend không gắn database (không truy vấn DB phía server)
+    assert.equal(front.database, undefined);
 });
 
 // ---------------- detectStructure ----------------

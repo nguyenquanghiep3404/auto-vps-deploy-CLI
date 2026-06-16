@@ -10,6 +10,7 @@ Tool tự quét repo **trước khi hỏi** để đoán sẵn cấu trúc và l
 - **Cấu trúc Single / Monorepo**: Dựa vào `package.json` `workspaces`, `pnpm-workspace.yaml`, `turbo.json`, hoặc các thư mục con quen thuộc (`frontend`, `backend`, `apps/*`, `packages/*`...). Nếu là Monorepo, tool **liệt kê sẵn từng phần** kèm tên + thư mục.
 - **Loại dự án (backend/frontend)**: Phân biệt **Node.js (PM2)** vs **React/Vite/Vue (SPA)** theo dependencies trong `package.json` (có `express`/`next`/`nest` → server PM2; có `vite`/`react`/`vue` mà không có server → SPA tĩnh); nhận diện **Laravel** (`artisan` + `laravel/framework`), **PHP thuần** (`composer.json`/file `.php`), và **Static** (chỉ `index.html`).
 - **Chi tiết phụ**: Đoán luôn `buildDir` (đọc `outDir` trong `vite.config`), `start:prod` cho NestJS, có dùng **Prisma** không, và **phiên bản PHP** (từ `composer.json` `require.php`).
+- **Loại Database 🆕**: Tự nhận diện DB đang dùng theo thứ tự ưu tiên: `prisma/schema.prisma` (`provider`) → driver trong `package.json` (`pg`/`mysql2`/`mongoose`/`@supabase/supabase-js`...) → `DATABASE_URL`/`DB_CONNECTION` trong `.env`. Nếu tìm thấy, câu hỏi "có cần Database không?" sẽ **mặc định Có** và **chọn sẵn đúng engine** (MySQL/PostgreSQL/MongoDB/Supabase).
 
 > Mọi kết quả chỉ là **gợi ý điền sẵn** — bạn luôn có toàn quyền sửa ở từng bước. Đoán sai cũng không sao.
 

@@ -20,7 +20,7 @@ import {
     stripAppPort
 } from '../src/utils/env.js';
 import { detectPackageManager, detectWorkspace, hasBuildScript, scanHardcodedPorts, scanLocalhostUrls, findLocalhostUrls } from '../src/utils/project.js';
-import { detectProject } from '../src/utils/detect.js';
+import { detectProject, detectDatabase, databaseLabel } from '../src/utils/detect.js';
 import { execa, execaCommand } from 'execa';
 import path from 'path';
 
@@ -164,24 +164,33 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
 
     // ---- Database (Node / Laravel / PHP thuần) ----
     if (isNode || isLaravel || isPurePhp) {
+        // Tự nhận diện DB từ source (Prisma schema / driver / .env...) -> điền sẵn câu trả lời,
+        // người dùng vẫn sửa tay được. Nếu phát hiện DB -> mặc định "Có".
+        const detectedDb = detectDatabase(workDirAbs);
+        const dbHint = detectedDb && detectedDb.engine ? detectedDb : null;
+        if (dbHint) {
+            console.log(chalk.cyan(`   🔍 Tự phát hiện Database: ${chalk.bold(databaseLabel(dbHint))} (từ ${dbHint.source}).`));
+        }
+        const baseMsg = isNode
+            // App Node (vd Next.js) ĐƯỢC hỏi vì nó có thể truy vấn DB trực tiếp (API routes,
+            // server components/actions). Nếu "frontend" chỉ gọi API của backend thì chọn No.
+            ? 'Phần này có kết nối TRỰC TIẾP tới Database không? (Next.js/Express có thể truy vấn DB trực tiếp. Nếu frontend chỉ gọi API của backend → chọn No)'
+            : 'Phần này có cần Database không? (Tool sẽ tự cài DB server, tạo database + user và nạp biến kết nối vào .env)';
         const { needsDb } = await inquirer.prompt([{
             type: 'confirm',
             name: 'needsDb',
-            // App Node (vd Next.js) ĐƯỢC hỏi vì nó có thể truy vấn DB trực tiếp (API routes,
-            // server components/actions). Nếu "frontend" của bạn chỉ gọi API của backend thì
-            // KHÔNG cần DB ở đây — cứ chọn No (mặc định). DB sẽ khai báo ở phần backend.
-            message: isNode
-                ? 'Phần này có kết nối TRỰC TIẾP tới Database không? (Next.js/Express có thể truy vấn DB trực tiếp. Nếu frontend chỉ gọi API của backend → chọn No)'
-                : 'Phần này có cần Database không? (Tool sẽ tự cài DB server, tạo database + user và nạp biến kết nối vào .env)',
-            default: false
+            message: baseMsg,
+            default: !!dbHint
         }]);
         if (needsDb) {
             const SUPABASE_CHOICE = 'Supabase (PostgreSQL Cloud - bạn tự quản lý)';
+            const engineToChoice = { postgresql: 'PostgreSQL', mysql: 'MySQL', mongodb: 'MongoDB', supabase: SUPABASE_CHOICE };
             const { engine } = await inquirer.prompt([{
                 type: 'rawlist',
                 name: 'engine',
                 message: 'Chọn loại Database:',
-                choices: ['MySQL', 'PostgreSQL', 'MongoDB', SUPABASE_CHOICE]
+                choices: ['MySQL', 'PostgreSQL', 'MongoDB', SUPABASE_CHOICE],
+                default: (dbHint && engineToChoice[dbHint.engine]) || undefined
             }]);
 
             if (engine === SUPABASE_CHOICE) {
@@ -395,6 +404,7 @@ async function main() {
             p.buildDir ? `build: ${p.buildDir}` : null,
             p.startScript && p.startScript !== 'start' ? `script: ${p.startScript}` : null,
             p.usePrisma ? 'Prisma' : null,
+            p.database ? `DB: ${databaseLabel(p.database)}` : null,
             p.phpVersion ? `PHP ${p.phpVersion}` : null
         ].filter(Boolean).join(', ');
         console.log(chalk.white(`  • ${chalk.bold(p.name)} (${p.workingDir}): ${type}${extra ? chalk.gray(' — ' + extra) : ''}`));

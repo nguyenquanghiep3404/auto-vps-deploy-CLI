@@ -227,6 +227,40 @@ test('rsync luôn loại trừ .github (không đẩy workflow CI vào webroot)'
     }
 });
 
+test('Monorepo NON-workspace: nguồn rsync KHÔNG bị lồng thư mục con (regression)', () => {
+    // Bug: working-directory đã cd vào thư mục con, nếu nguồn rsync còn ghép lại workingDir
+    // -> ./frontend/frontend (không tồn tại) -> rsync lỗi. Nguồn phải là './' (hoặc 'dist/' cho SPA).
+    const node = gen({
+        projectType: NODE, domain: 'fe.com', role: 'frontend', workingDir: './frontend',
+        usePrisma: false, port: 3000, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true
+    });
+    assert.match(node.content, /working-directory: \.\/frontend/);
+    assert.match(node.content, /--exclude 'node_modules' \.\/ \$USER@\$HOST:\/var\/www\/fe\.com/);
+    assert.ok(!/\.\/frontend\/frontend/.test(node.content), 'không được lồng ./frontend/frontend');
+    assert.ok(!/frontend\/ \$USER@/.test(node.content), 'nguồn rsync không được chứa lại tên thư mục con');
+
+    const spa = gen({
+        projectType: SPA, domain: 'fe.com', role: 'frontend', workingDir: './frontend',
+        buildDir: 'dist', isWorkspace: false, packageManager: 'npm'
+    });
+    assert.match(spa.content, /working-directory: \.\/frontend/);
+    assert.match(spa.content, /dist\/ \$USER@\$HOST:\/var\/www\/fe\.com/);
+    assert.ok(!/frontend\/dist/.test(spa.content), 'SPA: không được lồng ./frontend/dist');
+
+    const lar = gen({
+        projectType: LARAVEL, domain: 'api.com', role: 'backend', workingDir: './api',
+        envSecretName: 'ENV_FILE_BACKEND', phpVersion: '8.3'
+    });
+    assert.match(lar.content, /working-directory: \.\/api/);
+    assert.match(lar.content, /\.\/ \$USER@\$HOST:\/var\/www\/api\.com/);
+    assert.ok(!/\.\/api\/api/.test(lar.content), 'Laravel: không được lồng ./api/api');
+
+    const stat = gen({ projectType: STATIC, domain: 's.com', role: 'site', workingDir: './site' });
+    assert.match(stat.content, /working-directory: \.\/site/);
+    assert.match(stat.content, /\.\/ \$USER@\$HOST:\/var\/www\/s\.com/);
+    assert.ok(!/\.\/site\/site/.test(stat.content), 'Static: không được lồng ./site/site');
+});
+
 test('Node single: health-check cổng + pm2 --update-env (chống hardcode cổng)', () => {
     const { content } = gen({
         projectType: NODE, domain: 'hc.com', role: 'Fullstack (Gốc)', workingDir: './',

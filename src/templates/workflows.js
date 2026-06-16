@@ -12,6 +12,19 @@ function getWorkingDirConfig(workingDir) {
 }
 
 /**
+ * Thư mục NGUỒN cho rsync trong nhánh KHÔNG-workspace.
+ *
+ * QUAN TRỌNG: khi workingDir là thư mục con, job đã set `defaults.run.working-directory`,
+ * nên MỌI bước `run` (gồm cả bước rsync) đã chạy SẴN bên trong thư mục con đó. Vì vậy nguồn
+ * rsync phải TƯƠNG ĐỐI với thư mục con — luôn là './' (toàn bộ nội dung thư mục đang đứng).
+ * Nếu ghép thêm `${workingDir}/` sẽ tạo đường dẫn lồng (vd ./frontend/frontend) khiến rsync
+ * báo "No such file or directory" và deploy thất bại.
+ */
+function rsyncSourceDir() {
+    return './';
+}
+
+/**
  * Bỏ "./" ở đầu và "/" ở cuối để lấy đường dẫn thư mục con sạch.
  * './' hoặc '' -> '' (tức là thư mục gốc của repo).
  */
@@ -196,8 +209,8 @@ ${buildStep}
 `;
     }
 
-    // Mặc định (không phải workspace).
-    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
+    // Mặc định (không phải workspace). Nguồn rsync TƯƠNG ĐỐI với working-directory (xem rsyncSourceDir).
+    const rsyncSrc = rsyncSourceDir();
     const envStep = getEnvStep(envSecretName, '.env');
     const vpsScript = joinVpsScript([
         `cd /var/www/${domain}`,
@@ -256,7 +269,7 @@ ${buildStep}
 }
 
 function getLaravelWorkflow(domain, workingDir, envSecretName, phpVersion) {
-    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
+    const rsyncSrc = rsyncSourceDir();
     const ver = phpVersion || '8.3';
     // Nạp .env vào thư mục mã nguồn trước khi rsync để file .env được đẩy lên VPS.
     const envStep = getEnvStep(envSecretName, '.env');
@@ -317,7 +330,7 @@ ${envStep}
 }
 
 function getPurePhpWorkflow(domain, workingDir, envSecretName) {
-    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
+    const rsyncSrc = rsyncSourceDir();
     const envStep = getEnvStep(envSecretName, '.env');
 
     return `name: Deploy PHP App
@@ -401,8 +414,9 @@ ${corepackStep}${envStep}
 `;
     }
 
-    let rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
-    rsyncSrc = path.posix.join(rsyncSrc, buildDir, '/'); // e.g., ./dist/ hoặc ./frontend/dist/
+    // Nguồn rsync TƯƠNG ĐỐI với working-directory: chỉ thư mục build (vd 'dist/'), KHÔNG ghép workingDir
+    // (job đã cd sẵn vào thư mục con). Ghép workingDir sẽ tạo đường dẫn lồng và rsync sẽ lỗi.
+    const rsyncSrc = path.posix.join(rsyncSourceDir(), buildDir, '/'); // -> 'dist/'
     // Nạp .env trước khi build để Vite/CRA đọc được biến VITE_* / REACT_APP_* lúc build.
     const envStep = getEnvStep(envSecretName, '.env');
 
@@ -447,7 +461,7 @@ ${corepackStep}${envStep}
 }
 
 function getStaticWorkflow(domain, workingDir) {
-    const rsyncSrc = workingDir === './' ? './' : `${workingDir}/`;
+    const rsyncSrc = rsyncSourceDir();
     return `name: Deploy Static Website
 
 on:
