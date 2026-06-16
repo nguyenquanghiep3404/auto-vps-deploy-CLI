@@ -57,6 +57,7 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
         packageManager: 'npm',
         startScript: 'start',
         hasBuild: false,
+        buildAtRoot: false,
         nodeVersion: null
     };
 
@@ -157,10 +158,23 @@ async function collectExtras({ projectType, workingDir, defaultEnvPath, isMonore
         extras.startScript = (startScript || '').trim() || 'start';
     }
 
-    // ---- Có script build hay không (build ở gốc nếu là workspace) ----
+    // ---- Có script build hay không + build ở đâu ----
     if (isJs) {
-        const buildCheckDir = extras.isWorkspace ? repoRoot : workDirAbs;
-        extras.hasBuild = hasBuildScript(buildCheckDir);
+        if (extras.isWorkspace) {
+            // Workspace: build ở GỐC nếu gốc có script build (vd turbo). Nếu CHỈ package con có script
+            // build (gốc không có), build NGAY trong package con (deps hoist về gốc) -> tránh bỏ sót
+            // build khiến dist/ không được tạo (dist/ thường không nằm trong git).
+            const rootHasBuild = hasBuildScript(repoRoot);
+            const subHasBuild = hasBuildScript(workDirAbs);
+            extras.hasBuild = rootHasBuild || subHasBuild;
+            extras.buildAtRoot = rootHasBuild;
+            if (!rootHasBuild && subHasBuild) {
+                console.log(chalk.gray('   ℹ️  Workspace: gốc không có script build → sẽ build ngay trong thư mục con.'));
+            }
+        } else {
+            extras.hasBuild = hasBuildScript(workDirAbs);
+            extras.buildAtRoot = false; // build chạy trong working-directory của job
+        }
         // Tự nhận diện phiên bản Node (engines.node/.nvmrc) — ưu tiên thư mục phần, rồi gốc repo.
         const nv = detectNodeVersion(workDirAbs) || detectNodeVersion(repoRoot);
         extras.nodeVersion = nv;
@@ -544,6 +558,7 @@ async function main() {
             packageManager: extras.packageManager,
             startScript: extras.startScript,
             hasBuild: extras.hasBuild,
+            buildAtRoot: extras.buildAtRoot,
             nodeVersion: extras.nodeVersion
         });
 
@@ -672,6 +687,7 @@ async function main() {
                 packageManager: extras.packageManager,
                 startScript: extras.startScript,
                 hasBuild: extras.hasBuild,
+                buildAtRoot: extras.buildAtRoot,
                 nodeVersion: extras.nodeVersion
             });
         }
@@ -816,6 +832,7 @@ async function main() {
                 packageManager: part.packageManager,
                 startScript: part.startScript,
                 hasBuild: part.hasBuild,
+                buildAtRoot: part.buildAtRoot,
                 nodeVersion: part.nodeVersion
             });
         }

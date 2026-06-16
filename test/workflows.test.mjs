@@ -261,6 +261,34 @@ test('Monorepo NON-workspace: nguồn rsync KHÔNG bị lồng thư mục con (r
     assert.ok(!/\.\/site\/site/.test(stat.content), 'Static: không được lồng ./site/site');
 });
 
+test('Workspace build: gốc có script build -> build ở gốc (không working-directory)', () => {
+    const { content } = gen({
+        projectType: NODE, domain: 'api.com', role: 'backend', workingDir: './apps/api',
+        usePrisma: false, port: 3001, isWorkspace: true, packageManager: 'npm',
+        startScript: 'start', hasBuild: true, buildAtRoot: true
+    });
+    assert.match(content, /- name: Build Project\n        run: npm run build/);
+    assert.ok(!/Build Project\n        working-directory/.test(content), 'build ở gốc thì không set working-directory');
+});
+
+test('Workspace build: CHỈ package con có script build -> build trong package con (regression dist/)', () => {
+    // Đây là lỗi người dùng lo: workspace mà gốc không có build -> trước đây bỏ qua build -> thiếu dist/.
+    const { content } = gen({
+        projectType: NODE, domain: 'api.com', role: 'backend', workingDir: './apps/api',
+        usePrisma: false, port: 3001, isWorkspace: true, packageManager: 'npm',
+        startScript: 'start', hasBuild: true, buildAtRoot: false
+    });
+    assert.match(content, /- name: Build Project\n        working-directory: apps\/api\n        run: npm run build/);
+});
+
+test('SPA workspace build: build trong package con khi gốc không có build', () => {
+    const { content } = gen({
+        projectType: SPA, domain: 'fe.com', role: 'frontend', workingDir: './apps/web',
+        buildDir: 'dist', isWorkspace: true, packageManager: 'npm', buildAtRoot: false
+    });
+    assert.match(content, /- name: Build Project\n        working-directory: apps\/web\n        run: npm run build/);
+});
+
 test('Node single: health-check cổng + pm2 --update-env (chống hardcode cổng)', () => {
     const { content } = gen({
         projectType: NODE, domain: 'hc.com', role: 'Fullstack (Gốc)', workingDir: './',
