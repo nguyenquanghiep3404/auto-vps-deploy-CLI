@@ -34,6 +34,15 @@ function cleanWorkingDir(workingDir) {
 
 /**
  * Trả về các câu lệnh tương ứng với từng package manager (npm/pnpm/yarn).
+ *
+ * Phân biệt 2 loại cài đặt:
+ *   - `ci`  : cài trên RUNNER, NGAY TRƯỚC bước build (next build / vite build). BẮT BUỘC có
+ *             devDependencies, vì toolchain build (typescript, @types/*, tailwindcss, eslint,
+ *             autoprefixer...) thường nằm ở devDependencies. Ta ép cài cả devDeps một cách TƯỜNG MINH
+ *             (npm --include=dev, pnpm/yarn --prod=false) để build KHÔNG hỏng kể cả khi runner lỡ có
+ *             NODE_ENV=production — vì khi đó npm ci/pnpm/yarn sẽ ÂM THẦM bỏ devDeps -> build fail.
+ *   - `prod`: cài trên VPS lúc runtime, SAU khi build artifact đã được rsync lên. CHỈ cần dependencies
+ *             production (bỏ devDeps cho nhẹ). Không đụng tới phần này.
  */
 function pmCommands(packageManager) {
     const pm = packageManager || 'npm';
@@ -41,7 +50,7 @@ function pmCommands(packageManager) {
         return {
             pm: 'pnpm',
             needCorepack: true,
-            ci: 'pnpm install --frozen-lockfile || pnpm install',
+            ci: 'pnpm install --frozen-lockfile --prod=false || pnpm install --prod=false',
             prod: 'pnpm install --prod --frozen-lockfile || pnpm install --prod',
             run: (s) => `pnpm run ${s}`,
             pm2Bin: 'pnpm',
@@ -52,7 +61,7 @@ function pmCommands(packageManager) {
         return {
             pm: 'yarn',
             needCorepack: true,
-            ci: 'yarn install --frozen-lockfile || yarn install',
+            ci: 'yarn install --frozen-lockfile --production=false || yarn install --production=false',
             prod: 'yarn install --production',
             run: (s) => `yarn ${s}`,
             pm2Bin: 'yarn',
@@ -62,7 +71,7 @@ function pmCommands(packageManager) {
     return {
         pm: 'npm',
         needCorepack: false,
-        ci: 'npm ci || npm install',
+        ci: 'npm ci --include=dev || npm install --include=dev',
         prod: 'npm ci --production || npm install --production',
         run: (s) => `npm run ${s}`,
         pm2Bin: 'npm',

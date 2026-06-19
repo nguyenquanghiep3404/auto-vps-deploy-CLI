@@ -88,7 +88,7 @@ test('Node monorepo workspace + npm + Prisma', () => {
     assert.match(content, /Monorepo Workspace/);
     assert.ok(!content.includes('working-directory'), 'workspace cài ở gốc, không set working-directory');
     assert.match(content, /printf '%s\\n' "\$ENV_FILE_CONTENT" > apps\/api\/\.env/);
-    assert.match(content, /run: npm ci \|\| npm install/);
+    assert.match(content, /run: npm ci --include=dev \|\| npm install --include=dev/);
     assert.match(content, /--exclude 'node_modules' \.\/ \$USER@\$HOST:\/var\/www\/api\.com/);
     assert.match(content, /--filter='P \.env'/); // bảo vệ .env khỏi --delete
     assert.match(content, /cd \/var\/www\/api\.com\n/);
@@ -341,7 +341,7 @@ test('Node version build = runtime (22) và npm ci có fallback', () => {
     });
     assert.match(content, /node-version: '22'/);
     assert.ok(!content.includes("node-version: '26'"), 'không còn Node 26');
-    assert.match(content, /npm ci \|\| npm install/);
+    assert.match(content, /npm ci --include=dev \|\| npm install --include=dev/);
 });
 
 test('nodeVersion: dùng phiên bản tự nhận diện, mặc định 22 khi không truyền', () => {
@@ -367,6 +367,40 @@ test('nodeVersion: dùng phiên bản tự nhận diện, mặc định 22 khi k
         usePrisma: false, port: 3002, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true
     });
     assert.match(def.content, /node-version: '22'/);
+});
+
+test('Build-time install LUÔN cài devDependencies (next build/vite build không hỏng khi NODE_ENV=production)', () => {
+    // Bug gốc: bước cài deps trên runner trước `build` có thể ÂM THẦM bỏ devDeps khi runner có
+    // NODE_ENV=production -> thiếu typescript/@types/tailwind... -> next build / vite build fail.
+    // Fix: ép cài devDeps tường minh ở bước build (npm --include=dev, pnpm/yarn --prod(uction)=false).
+    const nodeCases = [
+        { pm: 'npm', re: /run: npm ci --include=dev \|\| npm install --include=dev/ },
+        { pm: 'pnpm', re: /run: pnpm install --frozen-lockfile --prod=false \|\| pnpm install --prod=false/ },
+        { pm: 'yarn', re: /run: yarn install --frozen-lockfile --production=false \|\| yarn install --production=false/ }
+    ];
+    for (const { pm, re } of nodeCases) {
+        // Node single (build trên runner)
+        const node = gen({
+            projectType: NODE, domain: 'dev.com', role: 'Fullstack (Gốc)', workingDir: './',
+            usePrisma: false, port: 3001, isWorkspace: false, packageManager: pm, startScript: 'start', hasBuild: true
+        });
+        assert.match(node.content, re, `${pm}: Node phải ép devDeps ở bước build`);
+
+        // SPA single (Vite/CRA cũng build trên runner)
+        const spa = gen({
+            projectType: SPA, domain: 'spa.com', role: 'Fullstack (Gốc)', workingDir: './',
+            buildDir: 'dist', isWorkspace: false, packageManager: pm
+        });
+        assert.match(spa.content, re, `${pm}: SPA phải ép devDeps ở bước build`);
+    }
+
+    // VPS-side prod install KHÔNG được kéo theo devDeps (vẫn gọn nhẹ ở runtime).
+    const npmNode = gen({
+        projectType: NODE, domain: 'prod.com', role: 'Fullstack (Gốc)', workingDir: './',
+        usePrisma: false, port: 3001, isWorkspace: false, packageManager: 'npm', startScript: 'start', hasBuild: true
+    });
+    assert.match(npmNode.content, /npm ci --production \|\| npm install --production/);
+    assert.ok(!/--production[\s\S]*--include=dev/.test(npmNode.content), 'prod install không được ép devDeps');
 });
 
 test('Actions dùng @v4 (checkout/setup-node), không còn @v3 deprecated', () => {
